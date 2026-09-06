@@ -495,7 +495,7 @@ function renderWorkers(q=''){
 }
 async function moveSelectedWorkers(dir){if(!S.selectedWorkers.size)return;const a=S.data.workers;if(dir<0){for(let i=1;i<a.length;i++)if(S.selectedWorkers.has(a[i].id)&&!S.selectedWorkers.has(a[i-1].id))[a[i-1],a[i]]=[a[i],a[i-1]]}else{for(let i=a.length-2;i>=0;i--)if(S.selectedWorkers.has(a[i].id)&&!S.selectedWorkers.has(a[i+1].id))[a[i],a[i+1]]=[a[i+1],a[i]]}await persist('Urutan pekerja diubah');render()}
 
-/* ===== v15: Supabase master sync (PC / mobile same data) ===== */
+/* ===== v16: Supabase master sync - proven v14 REST path compatibility ===== */
 function v15HasMeaningfulData(d){
   if(!d||typeof d!=='object')return false;
   const keys=['products','boxes','orders','completed','shipments','inventory','workers','loginUsers'];
@@ -527,13 +527,13 @@ function v15LocalChangesSatisfied(base,local,cloud){
   return true;
 }
 async function v15FetchMaster(){
-  const {data:rows,error}=await S.supabase.from('app_state').select('id,data,updated_at').eq('id','main').limit(1);
+  const {data:rows,error}=await S.supabase.from('app_state').select('data,updated_at').eq('id','main').limit(1);
   if(error)throw error;
   return Array.isArray(rows)?rows[0]:rows;
 }
 async function v15WriteMaster(data){
   const payload={id:'main',data,updated_at:new Date().toISOString()};
-  const {data:rows,error}=await S.supabase.from('app_state').upsert(payload,{onConflict:'id'}).select('id,data,updated_at');
+  const {data:rows,error}=await S.supabase.from('app_state').upsert(payload).select('data,updated_at');
   if(error)throw error;
   const row=Array.isArray(rows)?rows[0]:rows;
   if(!row?.data)throw new Error('Server tidak mengembalikan data setelah penyimpanan.');
