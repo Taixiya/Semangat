@@ -64,7 +64,8 @@ async function syncCloudState(){
   if(!S.cloud||!S.supabase||S.syncing)return;S.syncing=true;clearTimeout(S.syncTimer);setSync('Menyinkronkan…','syncing');
   try{
     await migrateImagesToCloud();
-    const {data:row,error:readErr}=await S.supabase.from('app_state').select('data,updated_at').eq('id','main').maybeSingle();if(readErr)throw readErr;
+    const {data:rows,error:readErr}=await S.supabase.from('app_state').select('data,updated_at').eq('id','main').limit(1);if(readErr)throw readErr;
+    const row=Array.isArray(rows)?rows[0]:null;
     const remote=row?.data&&Object.keys(row.data).length?row.data:cloneData(blank);
     const merged=mergeState(S.baseData||remote,S.data,remote);normalizeFor(merged);
     const now=new Date().toISOString();const {error}=await S.supabase.from('app_state').upsert({id:'main',data:merged,updated_at:now});if(error)throw error;
@@ -90,13 +91,14 @@ async function connectCloud(){
   const {url,key}=S.settings;if(!url||!key){S.cloud=false;renderLoginGateway();return}
   try{
     S.supabase=window.supabase.createClient(url,key,{auth:{persistSession:false,autoRefreshToken:false,detectSessionInUrl:false}});S.cloud=true;
-    const {data:state,error}=await S.supabase.from('app_state').select('data,updated_at').eq('id','main').maybeSingle();if(error)throw error;
+    const {data:states,error}=await S.supabase.from('app_state').select('data,updated_at').eq('id','main').limit(1);if(error)throw error;
+    const state=Array.isArray(states)?states[0]:null;
     if(state?.data&&Object.keys(state.data).length){S.data=state.data;normalize();S.baseData=cloneData(S.data);S.remoteUpdatedAt=state.updated_at;saveLocal()}else{await migrateImagesToCloud();await S.supabase.from('app_state').upsert({id:'main',data:S.data,updated_at:new Date().toISOString()});S.baseData=cloneData(S.data)}
     S.supabase.removeAllChannels();S.supabase.channel('nayeso-id-state').on('postgres_changes',{event:'*',schema:'public',table:'app_state',filter:'id=eq.main'},payload=>{if(!payload.new?.data)return;if(S.localDirty||S.syncing){S.pendingRemote=payload.new.data;setSync('Ada perubahan lain · menyinkronkan…','pending');return}S.data=payload.new.data;normalize();S.baseData=cloneData(S.data);S.remoteUpdatedAt=payload.new.updated_at;saveLocal();if(S.sessionRole)render();else renderLoginGateway();setSync('Perubahan terbaru diterapkan','ok')}).subscribe(status=>{if(status==='SUBSCRIBED')setSync('DB bersama aktif · real-time','ok')});
     if(S.sessionRole)render();else renderLoginGateway();
-  }catch(e){console.error(e);S.cloud=false;setSync('Cloud belum tersambung · mode lokal','error');renderLoginGateway('Koneksi cloud belum aktif. Anda masih dapat membuka program secara lokal.')}
+  }catch(e){console.error('SUPABASE_CONNECT_ERROR',e);S.cloud=false;setSync('Cloud belum tersambung · mode lokal','error');const msg=e?.message||e?.error_description||e?.details||String(e||'');renderLoginGateway('Koneksi cloud belum aktif. '+(msg?('Detail: '+msg):'Periksa pengaturan Supabase.'))}
 }
-async function refreshFromCloud(){if(!S.cloud||S.localDirty)return;const {data:state}=await S.supabase.from('app_state').select('data,updated_at').eq('id','main').maybeSingle();if(state?.data){S.data=state.data;normalize();S.baseData=cloneData(S.data);S.remoteUpdatedAt=state.updated_at;saveLocal();if(S.sessionRole)render();else renderLoginGateway();setSync('Data terbaru dimuat','ok')}}
+async function refreshFromCloud(){if(!S.cloud||S.localDirty)return;const {data:states,error}=await S.supabase.from('app_state').select('data,updated_at').eq('id','main').limit(1);if(error){console.error(error);setSync('Gagal memuat cloud','error');return}const state=Array.isArray(states)?states[0]:null;if(state?.data){S.data=state.data;normalize();S.baseData=cloneData(S.data);S.remoteUpdatedAt=state.updated_at;saveLocal();if(S.sessionRole)render();else renderLoginGateway();setSync('Data terbaru dimuat','ok')}}
 function renderLoginGateway(msg=''){
   document.getElementById('userBtn').classList.add('hidden');document.getElementById('searchBox').classList.add('hidden');meta('Login','Pilih jenis login');
   content.innerHTML=`<div class="login-shell"><div class="auth-card login-choice"><h2>SEMANGAT</h2><p class="note">Pilih cara masuk.</p>${msg?`<div class="alert">${esc(msg)}</div>`:''}<div class="login-choice-grid"><button class="login-big primary" onclick="renderWorkerLogin()"><b>Login Umum</b><span>Pekerja memilih nama lalu langsung masuk</span></button><button class="login-big secondary" onclick="renderAdminLogin()"><b>Login Admin</b><span>Pengaturan dan pengelolaan pengguna</span></button></div></div></div>`
