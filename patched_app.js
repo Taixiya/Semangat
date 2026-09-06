@@ -494,3 +494,158 @@ function renderWorkers(q=''){
   content.innerHTML=`<div class="toolbar"><label class="select-inline"><input type="checkbox" ${allChecked?'checked':''} onchange="setVisibleSelection('selectedWorkers',S.data.workers.filter(x=>JSON.stringify(x).toLowerCase().includes((document.getElementById('searchBox').value||'').toLowerCase())),this.checked)"> Pilih Semua</label><button class="secondary" onclick="clearSelection('selectedWorkers')">Batal Pilih</button><button class="secondary" onclick="moveSelectedWorkers(-1)">↑ Naik</button><button class="secondary" onclick="moveSelectedWorkers(1)">↓ Turun</button><button class="danger" onclick="deleteSelectedWorkers()" ${S.selectedWorkers.size?'':'disabled'}>Hapus Pilihan (${S.selectedWorkers.size})</button><span class="spacer"></span><button class="secondary" onclick="exportExcel('workers')">Excel</button><button class="secondary" onclick="printList('workers')">PDF / Print</button><button class="primary" onclick="openWorker()">+ Tambah Pekerja</button></div><div class="table-wrap worker-list-table"><table><thead><tr><th>Pilih</th><th>Nama Pekerja</th><th>Workshop</th><th>Kontak</th><th>Catatan</th><th>Riwayat Selesai</th><th></th></tr></thead><tbody>${a.map(w=>{const hist=all.filter(c=>c.workerId===w.id);return `<tr><td><input type="checkbox" ${S.selectedWorkers.has(w.id)?'checked':''} onchange="toggleSelection('selectedWorkers','${w.id}',this.checked)"></td><td><b>${esc(w.name)}</b></td><td>${esc(w.workplace||'-')}</td><td>${esc(w.phone||'-')}</td><td>${esc(w.note||'-')}</td><td>${fmt(hist.length)}</td><td><button class="secondary" onclick="openWorker('${w.id}')">Edit</button></td></tr>`}).join('')||'<tr><td colspan="7" class="note">Belum ada pekerja.</td></tr>'}</tbody></table></div>`;
 }
 async function moveSelectedWorkers(dir){if(!S.selectedWorkers.size)return;const a=S.data.workers;if(dir<0){for(let i=1;i<a.length;i++)if(S.selectedWorkers.has(a[i].id)&&!S.selectedWorkers.has(a[i-1].id))[a[i-1],a[i]]=[a[i],a[i-1]]}else{for(let i=a.length-2;i>=0;i--)if(S.selectedWorkers.has(a[i].id)&&!S.selectedWorkers.has(a[i+1].id))[a[i],a[i+1]]=[a[i+1],a[i]]}await persist('Urutan pekerja diubah');render()}
+
+/* ===== v15: Supabase master sync (PC / mobile same data) ===== */
+function v15HasMeaningfulData(d){
+  if(!d||typeof d!=='object')return false;
+  const keys=['products','boxes','orders','completed','shipments','inventory','workers','loginUsers'];
+  const count=keys.reduce((n,k)=>n+(Array.isArray(d[k])?d[k].length:0),0);
+  if(count>3)return true;
+  if(Array.isArray(d.products)&&d.products.some(p=>p?.name&&p.name!=='Sample Plate'))return true;
+  return false;
+}
+function v15CloudRequired(){return CFG.REQUIRE_CLOUD!==false}
+function v15RenderCloudError(message){
+  document.getElementById('userBtn')?.classList.add('hidden');
+  document.getElementById('searchBox')?.classList.add('hidden');
+  meta('Koneksi Data','Supabase harus terhubung agar PC dan HP memakai data yang sama');
+  content.innerHTML=`<div class="auth-card"><h2>Koneksi database belum berhasil</h2><p class="note">Program ini memakai Supabase sebagai sumber data utama. Data lokal tidak ditampilkan sebagai data utama agar PC dan HP tidak berbeda.</p><div class="alert">${esc(message||'Periksa koneksi internet lalu coba lagi.')}</div><div class="toolbar" style="margin-top:14px"><button class="primary" onclick="connectCloud()">↻ Coba Hubungkan Lagi</button></div></div>`;
+}
+function v15LocalChangesSatisfied(base,local,cloud){
+  base=base||cloneData(blank);local=local||cloneData(blank);cloud=cloud||cloneData(blank);
+  for(const k of ['products','boxes','orders','completed','shipments','inventory','workers','loginUsers','adminConfig']){
+    const bm=new Map((base[k]||[]).filter(x=>x?.id).map(x=>[x.id,x]));
+    const lm=new Map((local[k]||[]).filter(x=>x?.id).map(x=>[x.id,x]));
+    const cm=new Map((cloud[k]||[]).filter(x=>x?.id).map(x=>[x.id,x]));
+    for(const [id,b] of bm){
+      if(!lm.has(id)){if(cm.has(id))return false;}
+      else if(!same(lm.get(id),b)&&!same(cm.get(id),lm.get(id)))return false;
+    }
+    for(const [id,l] of lm)if(!bm.has(id)&&!same(cm.get(id),l))return false;
+  }
+  if(!same(base.groups||[],local.groups||[])&&!same(cloud.groups||[],local.groups||[]))return false;
+  return true;
+}
+async function v15FetchMaster(){
+  const {data:rows,error}=await S.supabase.from('app_state').select('id,data,updated_at').eq('id','main').limit(1);
+  if(error)throw error;
+  return Array.isArray(rows)?rows[0]:rows;
+}
+async function v15WriteMaster(data){
+  const payload={id:'main',data,updated_at:new Date().toISOString()};
+  const {data:rows,error}=await S.supabase.from('app_state').upsert(payload,{onConflict:'id'}).select('id,data,updated_at');
+  if(error)throw error;
+  const row=Array.isArray(rows)?rows[0]:rows;
+  if(!row?.data)throw new Error('Server tidak mengembalikan data setelah penyimpanan.');
+  return row;
+}
+async function syncCloudState(){
+  if(!S.cloud||!S.supabase||S.syncing)return false;
+  if(!navigator.onLine){S.localDirty=true;setSync(`Offline · belum tersinkron${S.pendingSyncCount?` · ${S.pendingSyncCount}`:''}`,'error');return false}
+  S.syncing=true;clearTimeout(S.syncTimer);setSync(`Menyinkronkan${S.pendingSyncCount?` · ${S.pendingSyncCount}`:''}…`,'syncing');
+  const baseAtStart=cloneData(S.baseData||S.data||blank);
+  const localAtStart=cloneData(S.data||blank);
+  try{
+    await migrateImagesToCloud();
+    // image migration may change local state, so use the newest local snapshot
+    const localSnapshot=cloneData(S.data||localAtStart);
+    let verified=null;
+    for(let attempt=0;attempt<6;attempt++){
+      const remoteRow=await v15FetchMaster();
+      const remote=(remoteRow?.data&&Object.keys(remoteRow.data).length)?remoteRow.data:cloneData(blank);
+      const merged=mergeState(baseAtStart,localSnapshot,remote);
+      normalizeFor(merged);
+      await v15WriteMaster(merged);
+      // Always re-read from Supabase. The counter disappears only after this verification succeeds.
+      const check=await v15FetchMaster();
+      if(check?.data&&v15LocalChangesSatisfied(baseAtStart,localSnapshot,check.data)){verified=check;break}
+      await new Promise(r=>setTimeout(r,120*(attempt+1)));
+    }
+    if(!verified)throw new Error('Perubahan belum dapat diverifikasi di server.');
+    S.data=verified.data;normalize();S.baseData=cloneData(S.data);S.remoteUpdatedAt=verified.updated_at||new Date().toISOString();
+    S.localDirty=false;S.pendingRemote=null;S.pendingSyncCount=0;S.lastSyncOkAt=Date.now();S.cloudReady=true;saveLocal();
+    if(S.sessionRole)render();else renderLoginGateway();
+    setSync('Tersinkron · data server terbaru','ok');return true;
+  }catch(e){
+    console.error('V15_SYNC_ERROR',e);S.localDirty=true;
+    setSync(`Sinkronisasi gagal${S.pendingSyncCount?` · ${S.pendingSyncCount}`:''} · tekan ↻`,'error');
+    return false;
+  }finally{S.syncing=false;updateSyncCounter()}
+}
+async function persist(label='Perubahan',detail=''){
+  const info=detail||buildChangeDetail(label);
+  S.data.logs.unshift({id:uid(),at:new Date().toISOString(),label,detail:info,by:currentActor()});purgeOldLogs();
+  // localStorage is only a recovery cache. Supabase remains the master source.
+  saveLocal();S.pendingSyncCount=(+S.pendingSyncCount||0)+1;S.localDirty=true;
+  setSync(`Menyinkronkan · ${S.pendingSyncCount}…`,'syncing');
+  if(S.cloud&&S.supabase&&navigator.onLine){await syncCloudState()}
+  else setSync(`Belum tersinkron · ${S.pendingSyncCount}`,'error');
+}
+async function connectCloud(){
+  const {url,key}=S.settings;
+  if(!url||!key){S.cloud=false;S.cloudReady=false;setSync('Konfigurasi cloud tidak ada','error');return v15RenderCloudError('SUPABASE_URL / SUPABASE_KEY belum tersedia.')}
+  try{
+    setSync('Menghubungkan database…','syncing');
+    if(!window.supabase?.createClient)throw new Error('Library Supabase tidak dapat dimuat. Periksa internet.');
+    S.supabase=window.supabase.createClient(url,key,{auth:{persistSession:false,autoRefreshToken:false,detectSessionInUrl:false}});S.cloud=true;
+    let state=await v15FetchMaster();
+    if(!state?.data||!Object.keys(state.data).length){
+      // One-time migration: only seed the empty server from an existing meaningful local dataset.
+      const seed=v15HasMeaningfulData(S.data)?cloneData(S.data):cloneData(blank);normalizeFor(seed);
+      state=await v15WriteMaster(seed);
+    }
+    S.data=state.data;normalize();S.baseData=cloneData(S.data);S.remoteUpdatedAt=state.updated_at||new Date().toISOString();S.localDirty=false;S.pendingSyncCount=0;S.pendingRemote=null;S.cloudReady=true;saveLocal();
+    try{
+      S.supabase.removeAllChannels();
+      S.supabase.channel('semangat-main-state-v15').on('postgres_changes',{event:'*',schema:'public',table:'app_state',filter:'id=eq.main'},async payload=>{
+        if(!payload.new?.data)return;
+        if(S.localDirty||S.syncing){S.pendingRemote=payload.new.data;return}
+        S.data=payload.new.data;normalize();S.baseData=cloneData(S.data);S.remoteUpdatedAt=payload.new.updated_at||new Date().toISOString();saveLocal();
+        if(S.sessionRole)render();else renderLoginGateway();setSync('Perubahan perangkat lain diterapkan','ok');
+      }).subscribe(status=>{if(status==='SUBSCRIBED')setSync('Tersinkron · real-time aktif','ok')});
+    }catch(realtimeErr){console.warn('REALTIME_OPTIONAL_ERROR',realtimeErr)}
+    startCloudPolling();
+    if(S.sessionRole)render();else renderLoginGateway();setSync('Tersinkron · data server terbaru','ok');
+  }catch(e){
+    console.error('V15_CONNECT_ERROR',e);S.cloud=false;S.cloudReady=false;
+    setSync('Database tidak terhubung','error');
+    if(v15CloudRequired())v15RenderCloudError(e.message||'Koneksi database gagal.');else renderLoginGateway();
+  }
+}
+function startCloudPolling(){
+  clearInterval(S.cloudPollTimer);
+  S.cloudPollTimer=setInterval(async()=>{
+    if(!S.cloud||!S.supabase||S.syncing||document.visibilityState==='hidden'||!navigator.onLine)return;
+    try{
+      if(S.localDirty||S.pendingSyncCount>0){await syncCloudState();return}
+      const state=await v15FetchMaster();if(!state?.data)return;
+      if(state.updated_at&&S.remoteUpdatedAt&&String(state.updated_at)===String(S.remoteUpdatedAt))return;
+      S.data=state.data;normalize();S.baseData=cloneData(S.data);S.remoteUpdatedAt=state.updated_at||new Date().toISOString();saveLocal();
+      if(S.sessionRole)render();else renderLoginGateway();setSync('Data terbaru diterapkan','ok');
+    }catch(e){console.warn('V15_POLL_ERROR',e);setSync('Pemeriksaan server gagal · ↻','error')}
+  },1500);
+}
+async function refreshFromCloud(){
+  if(!S.cloud||!S.supabase)return false;
+  if(S.localDirty||S.pendingSyncCount>0)return syncCloudState();
+  try{
+    setSync('Memuat data server…','syncing');const state=await v15FetchMaster();if(!state?.data)throw new Error('Data utama tidak ditemukan.');
+    S.data=state.data;normalize();S.baseData=cloneData(S.data);S.remoteUpdatedAt=state.updated_at||new Date().toISOString();saveLocal();
+    if(S.sessionRole)render();else renderLoginGateway();S.lastSyncOkAt=Date.now();setSync('Tersinkron · data server terbaru','ok');return true;
+  }catch(e){console.error('V15_REFRESH_ERROR',e);setSync('Gagal memuat data server · ↻','error');return false}
+}
+async function manualSync(){
+  if(S.syncing)return;
+  if(!navigator.onLine){setSync(`Offline · belum tersinkron${S.pendingSyncCount?` · ${S.pendingSyncCount}`:''}`,'error');return}
+  if(!S.cloud||!S.supabase){await connectCloud();return}
+  const btn=document.getElementById('manualSyncBtn');btn?.classList.add('is-syncing');
+  try{if(S.localDirty||S.pendingSyncCount>0)await syncCloudState();else await refreshFromCloud()}
+  finally{btn?.classList.remove('is-syncing');updateSyncCounter()}
+}
+async function init(){
+  load();buildNav();restoreAppSession();S.cloudReady=false;
+  document.getElementById('searchBox').oninput=()=>render();document.getElementById('excelFile').onchange=handleExcel;document.getElementById('productImageInput').onchange=productImagePicked;document.getElementById('productCameraInput').onchange=productImagePicked;
+  window.addEventListener('online',()=>{setSync('Online · sinkronisasi…','syncing');if(S.cloud){if(S.localDirty)syncCloudState();else refreshFromCloud()}else connectCloud()});
+  window.addEventListener('offline',()=>setSync('Offline · perubahan belum tersinkron','error'));
+  if(S.settings.url&&S.settings.key)await connectCloud();else {S.cloud=false;S.cloudReady=false;v15RenderCloudError('Konfigurasi Supabase tidak ditemukan.')}
+}
