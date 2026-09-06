@@ -297,3 +297,108 @@ function validBackupData(d){return d&&typeof d==='object'&&['products','boxes','
 function importBackup(){const i=document.createElement('input');i.type='file';i.accept='.json,application/json';i.onchange=async()=>{const f=i.files?.[0];if(!f)return;try{const parsed=JSON.parse(await f.text()),data=parsed.data||parsed;if(!validBackupData(data))throw new Error('Format backup tidak valid');if(!confirm(`Pulihkan backup ini?\nProduk ${data.products.length} · Box ${data.boxes.length} · Order ${data.orders.length} · Produk Selesai ${data.completed.length}\n\nData saat ini akan disimpan sebagai cadangan pemulihan.`))return;localStorage.setItem('nayeso_id_pre_restore_backup',JSON.stringify({at:new Date().toISOString(),data:S.data}));S.data=data;normalize();await persist('Backup JSON dipulihkan');alert('Backup berhasil dipulihkan.');render()}catch(e){alert('Backup tidak dapat dibaca: '+e.message)}};i.click()}
 async function undoLastRestore(){const raw=localStorage.getItem('nayeso_id_pre_restore_backup');if(!raw)return alert('Tidak ada data sebelum restore yang tersimpan.');if(!confirm('Kembalikan kondisi data sebelum restore terakhir?'))return;try{const old=JSON.parse(raw);if(!validBackupData(old.data))throw new Error('Cadangan tidak valid');const current=JSON.stringify({at:new Date().toISOString(),data:S.data});S.data=old.data;normalize();localStorage.setItem('nayeso_id_pre_restore_backup',current);await persist('Restore terakhir dibatalkan');render()}catch(e){alert(e.message)}}
 init();
+
+/* ===== v10 domestic-style detail / order / worker UI overrides ===== */
+function v10ModalStickyEnhance(){
+  if(!window.modalBody)return;
+  if(modalBody.querySelector(':scope > .modal-sticky-head'))return;
+  const title=modalBody.querySelector(':scope > h2');
+  if(!title)return;
+  const direct=[...modalBody.children];
+  const action=[...direct].reverse().find(el=>el.classList&&el.classList.contains('toolbar'));
+  const head=document.createElement('div');
+  head.className='modal-sticky-head';
+  const titleWrap=document.createElement('div');
+  titleWrap.className='modal-sticky-title';
+  titleWrap.appendChild(title);
+  head.appendChild(titleWrap);
+  if(action){
+    action.classList.add('modal-sticky-actions');
+    head.appendChild(action);
+  }
+  modalBody.prepend(head);
+}
+const _v10OpenModalBase=openModal;
+openModal=function(){_v10OpenModalBase();requestAnimationFrame(v10ModalStickyEnhance)};
+
+function productDetailHtml(p){
+  const note=(p.detailHtml&&String(p.detailHtml).trim())?p.detailHtml:legacyDetailsToHtml(p.details||[]);
+  return `<div class="product-detail-sheet">
+    <div class="product-detail-main">
+      <div class="product-detail-image">${p.image?`<img src="${esc(p.image)}" alt="">`:`<div class="noimg">Tanpa Gambar</div>`}</div>
+      <div class="product-detail-info">
+        <div class="size-strip">
+          <div><span>W</span><b>${fmt(p.w||0)} mm</b></div><div><span>D</span><b>${fmt(p.d||0)} mm</b></div><div><span>H</span><b>${fmt(p.h||0)} mm</b></div><div><span>CBM</span><b>${Number(p.cbm||0).toFixed(6)}</b></div>
+        </div>
+        <div class="detail-info-list">
+          <div><span>Nama Produk</span><b>${esc(p.name||'-')}</b></div>
+          <div><span>Grup</span><b>${esc(p.group||'-')}</b></div>
+          <div><span>Jenis Kayu</span><b>${esc(p.wood||'-')}</b></div>
+          <div><span>Finishing</span><b>${esc(p.finish||'-')}</b></div>
+          <div><span>Berat</span><b>${fmt(p.weight_g||0)} g</b></div>
+          <div><span>CBM</span><b>${Number(p.cbm||0).toFixed(6)} m³</b></div>
+          <div><span>Harga Default</span><b>${money(p.unitPrice||0)}</b></div>
+        </div>
+      </div>
+    </div>
+    <div class="product-detail-note">
+      <h3>Catatan Detail Produk</h3>
+      <div class="detail-note-view">${note||'<div class="note">Belum ada catatan detail.</div>'}</div>
+    </div>
+  </div>`;
+}
+function openProductDetail(id){
+  const p=S.data.products.find(x=>x.id===id);if(!p)return;
+  modalBody.innerHTML=`<div class="modal-sticky-head"><div class="modal-sticky-title"><h2>Detail Produk</h2></div><div class="toolbar modal-sticky-actions"><button class="primary" onclick="openProduct('${p.id}')">Edit</button><button class="secondary" onclick="printProduct('${p.id}')">PDF / Print</button></div></div>${productDetailHtml(p)}`;
+  _v10OpenModalBase();
+}
+
+function renderProducts(q=''){
+  meta('DB Produk','Cari menurut nama / grup · urutkan nama atau grup + nama');
+  let arr=S.data.products.filter(p=>JSON.stringify(p).toLowerCase().includes(q)&&(S.productGroupFilter==='all'||(p.group||'')===S.productGroupFilter));
+  const byName=(a,b)=>String(a.name||'').localeCompare(String(b.name||''),'id',{numeric:true,sensitivity:'base'}),byGroup=(a,b)=>String(a.group||'').localeCompare(String(b.group||''),'id',{numeric:true,sensitivity:'base'});
+  if(S.productSort==='group')arr.sort(byGroup);else if(S.productSort==='groupName')arr.sort((a,b)=>byGroup(a,b)||byName(a,b));else arr.sort(byName);arr=arr.slice(0,S.pageSize);
+  const controls=`<div class="toolbar no-print"><button class="secondary" onclick="selectVisibleProducts()">Pilih Semua</button><button class="secondary" onclick="clearProductSelection()">Batal Pilih</button><button class="secondary" onclick="moveSelectedProducts(-1)">↑ Naik</button><button class="secondary" onclick="moveSelectedProducts(1)">↓ Turun</button><button class="danger" onclick="deleteSelectedProducts()">Hapus Pilihan</button><span class="spacer"></span><label>Grup <select onchange="S.productGroupFilter=this.value;render()"><option value="all" ${S.productGroupFilter==='all'?'selected':''}>Semua Grup</option>${S.data.groups.map(g=>`<option value="${esc(g)}" ${S.productGroupFilter===g?'selected':''}>${esc(g)}</option>`).join('')}</select></label><label>Urutkan <select onchange="S.productSort=this.value;render()"><option value="name" ${S.productSort==='name'?'selected':''}>Nama</option><option value="group" ${S.productSort==='group'?'selected':''}>Grup</option><option value="groupName" ${S.productSort==='groupName'?'selected':''}>Grup + Nama</option></select></label><div class="tabs"><button class="${S.productView==='detail'?'active':''}" onclick="S.productView='detail';render()">Gambar + Detail</button><button class="${S.productView==='name'?'active':''}" onclick="S.productView='name';render()">Gambar + Nama</button><button class="${S.productView==='image'?'active':''}" onclick="S.productView='image';render()">Gambar</button></div><select onchange="S.pageSize=+this.value;render()">${[10,20,50,100].map(n=>`<option ${n===S.pageSize?'selected':''}>${n}</option>`).join('')}</select><button class="secondary" onclick="exportExcel('products')">Excel</button><button class="secondary" onclick="printProducts()">PDF / Print</button><button class="primary" onclick="openProduct()">+ Tambah Produk</button></div>`;
+  let body='';
+  if(S.productView==='detail')body=`<div class="product-list">${arr.map(p=>`<div class="product-row product-row-select"><div><input class="row-check" type="checkbox" ${S.selectedProducts.has(p.id)?'checked':''} onchange="toggleProduct('${p.id}',this.checked)"></div><div onclick="openProductDetail('${p.id}')">${imgTag(p)}</div><div onclick="openProductDetail('${p.id}')"><b>${esc(p.name)}</b> ${p.group?`<span class="badge">${esc(p.group)}</span>`:''}<div class="note">${esc(p.wood)} · ${esc(p.finish)}</div><div class="note">${productSize(p)} mm · ${fmt(p.weight_g||0)} g · CBM ${Number(p.cbm||0).toFixed(6)}</div></div><div class="row-actions"><button class="secondary" onclick="openProductDetail('${p.id}')">Detail</button></div></div>`).join('')}</div>`;
+  else body=`<div class="gallery">${arr.map(p=>`<div class="gallery-card gallery-select"><div class="card-check"><input class="row-check" type="checkbox" ${S.selectedProducts.has(p.id)?'checked':''} onchange="toggleProduct('${p.id}',this.checked)"></div><div onclick="openProductDetail('${p.id}')">${imgTag(p,'gallery-img')}${S.productView==='name'?`<div class="info"><b>${esc(p.name)}</b>${p.group?`<div><span class="badge">${esc(p.group)}</span></div>`:''}</div>`:''}</div></div>`).join('')}</div>`;
+  content.innerHTML=controls+body;
+}
+
+function orderRowImage(p){return p?.image?`<img class="order-doc-img" src="${esc(p.image)}">`:`<div class="order-doc-img noimg">-</div>`}
+function orderUpdateTotal(){
+  let total=0;
+  (_order?.items||[]).forEach((x,i)=>{const p=S.data.products.find(z=>z.id===x.productId),price=priceForWorker(p,document.getElementById('o_worker')?.value||_order.workerId),amount=price*(+x.qty||0);total+=amount;const a=document.getElementById(`order_amount_${i}`);if(a)a.textContent=money(amount)});
+  const el=document.getElementById('orderGrandTotal');if(el)el.textContent=money(total);
+}
+function orderQtyInput(i,el){_order.items[i].qty=+el.value||0;orderUpdateTotal()}
+function orderNoteInput(i,el){_order.items[i].note=el.value}
+function orderProductChange(i,val){_order.items[i].productId=val;drawOrderItems()}
+function orderToggle(i,checked){window._orderSelected=window._orderSelected||new Set();checked?_orderSelected.add(i):_orderSelected.delete(i)}
+function orderSelectAll(){window._orderSelected=new Set((_order.items||[]).map((_,i)=>i));drawOrderItems()}
+function orderClearSelect(){window._orderSelected=new Set();drawOrderItems()}
+function orderDeleteSelected(){const set=window._orderSelected||new Set();if(!set.size)return;_order.items=_order.items.filter((_,i)=>!set.has(i));window._orderSelected=new Set();drawOrderItems()}
+function orderMoveSelected(dir){const set=window._orderSelected||new Set();if(!set.size)return;const a=_order.items;if(dir<0){for(let i=1;i<a.length;i++)if(set.has(i)&&!set.has(i-1)){[a[i-1],a[i]]=[a[i],a[i-1]];set.delete(i);set.add(i-1)}}else{for(let i=a.length-2;i>=0;i--)if(set.has(i)&&!set.has(i+1)){[a[i],a[i+1]]=[a[i+1],a[i]];set.delete(i);set.add(i+1)}}drawOrderItems()}
+function openOrder(id){
+  const o=id?S.data.orders.find(x=>x.id===id):{id:uid(),orderNo:todayCode(),createdAt:new Date().toISOString(),workerId:'',items:[],note:'',archived:false};
+  window._order=JSON.parse(JSON.stringify(o));window._orderSelected=new Set();
+  const date=(o.createdAt||new Date().toISOString()).slice(0,10);
+  modalBody.innerHTML=`<h2>Form Order</h2><div class="order-document"><div class="order-doc-title">ORDER PRODUKSI</div><div class="order-doc-meta"><div class="field"><label>No. Order</label><input id="o_no" value="${esc(o.orderNo)}"></div><div class="field"><label>Tanggal Order</label><input id="o_date" type="date" value="${date}"></div><div class="field"><label>Pekerja</label><select id="o_worker" onchange="drawOrderItems()"><option value="">Pilih</option>${S.data.workers.map(w=>`<option value="${w.id}" ${o.workerId===w.id?'selected':''}>${esc(w.name)}</option>`).join('')}</select></div></div><div class="field"><label>Catatan Order</label><textarea id="o_note">${esc(o.note)}</textarea></div><div class="order-doc-tools"><button class="primary" onclick="addOrderItem()">+ Tambah Produk</button><button class="secondary" onclick="orderSelectAll()">Pilih Semua</button><button class="secondary" onclick="orderClearSelect()">Batal Pilih</button><button class="secondary" onclick="orderMoveSelected(-1)">↑ Naik</button><button class="secondary" onclick="orderMoveSelected(1)">↓ Turun</button><button class="danger" onclick="orderDeleteSelected()">Hapus Pilihan</button></div><div id="orderItems"></div><div class="order-total-box"><b>TOTAL</b><strong id="orderGrandTotal">Rp 0</strong></div></div><div class="toolbar"><button class="primary" onclick="saveOrder('${o.id}',${!!id})">Simpan</button>${id?`<button class="secondary" onclick="exportOrderExcel('${o.id}')">Excel</button><button class="secondary" onclick="printOrder('${o.id}')">PDF / Print</button><button class="danger" onclick="archiveOrder('${o.id}')">Hapus Order</button>`:''}</div>`;
+  openModal();drawOrderItems();
+}
+function drawOrderItems(){
+  const el=document.getElementById('orderItems');if(!el)return;
+  const wid=document.getElementById('o_worker')?.value||_order.workerId;const sel=window._orderSelected||new Set();
+  el.innerHTML=`<div class="order-table-wrap"><table class="order-entry-table"><thead><tr><th>Pilih</th><th>No.</th><th>Gambar</th><th>Produk / Ukuran</th><th>Kayu</th><th>Harga Produksi</th><th>Jumlah</th><th>Jumlah Harga</th><th>Catatan</th></tr></thead><tbody>${(_order.items||[]).map((x,i)=>{const p=S.data.products.find(z=>z.id===x.productId)||{},price=priceForWorker(p,wid),amount=price*(+x.qty||0);return `<tr><td><input type="checkbox" ${sel.has(i)?'checked':''} onchange="orderToggle(${i},this.checked)"></td><td>${i+1}</td><td>${orderRowImage(p)}</td><td><select onchange="orderProductChange(${i},this.value)"><option value="">Pilih Produk</option>${S.data.products.map(pp=>`<option value="${pp.id}" ${pp.id===x.productId?'selected':''}>${esc(pp.name)}</option>`).join('')}</select><div class="order-size">${x.productId?esc(productSize(p))+' mm':''}</div></td><td>${esc(p.wood||'-')}</td><td>${money(price)}</td><td><input class="order-qty-input" type="number" min="0" value="${x.qty||0}" oninput="orderQtyInput(${i},this)"></td><td><b id="order_amount_${i}">${money(amount)}</b></td><td><input value="${esc(x.note||'')}" oninput="orderNoteInput(${i},this)"></td></tr>`}).join('')||'<tr><td colspan="9" class="note">Belum ada produk. Klik + Tambah Produk.</td></tr>'}</tbody></table></div>`;
+  orderUpdateTotal();
+}
+async function saveOrder(id,exists){
+  _order.orderNo=o_no.value||todayCode();_order.workerId=o_worker.value;_order.note=o_note.value;const dt=document.getElementById('o_date')?.value;if(dt&&!exists)_order.createdAt=new Date(dt+'T12:00:00').toISOString();_order.items=_order.items.filter(i=>i.productId&&(+i.qty||0)>0);if(exists)S.data.orders[S.data.orders.findIndex(x=>x.id===id)]=_order;else S.data.orders.push(_order);await persist('Order disimpan / sisa produksi diperbarui');closeModal();render()
+}
+
+function renderWorkers(q=''){
+  meta('DB Pekerja','Daftar pekerja · workshop · kontak · riwayat produksi');
+  const a=S.data.workers.filter(x=>JSON.stringify(x).toLowerCase().includes(q)),all=allWorkerCompletions(),allChecked=a.length&&a.every(x=>S.selectedWorkers.has(x.id));
+  content.innerHTML=`<div class="toolbar"><label class="select-inline"><input type="checkbox" ${allChecked?'checked':''} onchange="setVisibleSelection('selectedWorkers',S.data.workers.filter(x=>JSON.stringify(x).toLowerCase().includes((document.getElementById('searchBox').value||'').toLowerCase())),this.checked)"> Pilih Semua</label><button class="secondary" onclick="clearSelection('selectedWorkers')">Batal Pilih</button><button class="secondary" onclick="moveSelectedWorkers(-1)">↑ Naik</button><button class="secondary" onclick="moveSelectedWorkers(1)">↓ Turun</button><button class="danger" onclick="deleteSelectedWorkers()" ${S.selectedWorkers.size?'':'disabled'}>Hapus Pilihan (${S.selectedWorkers.size})</button><span class="spacer"></span><button class="secondary" onclick="exportExcel('workers')">Excel</button><button class="secondary" onclick="printList('workers')">PDF / Print</button><button class="primary" onclick="openWorker()">+ Tambah Pekerja</button></div><div class="table-wrap worker-list-table"><table><thead><tr><th>Pilih</th><th>Nama Pekerja</th><th>Workshop</th><th>Kontak</th><th>Catatan</th><th>Riwayat Selesai</th><th></th></tr></thead><tbody>${a.map(w=>{const hist=all.filter(c=>c.workerId===w.id);return `<tr><td><input type="checkbox" ${S.selectedWorkers.has(w.id)?'checked':''} onchange="toggleSelection('selectedWorkers','${w.id}',this.checked)"></td><td><b>${esc(w.name)}</b></td><td>${esc(w.workplace||'-')}</td><td>${esc(w.phone||'-')}</td><td>${esc(w.note||'-')}</td><td>${fmt(hist.length)}</td><td><button class="secondary" onclick="openWorker('${w.id}')">Edit</button></td></tr>`}).join('')||'<tr><td colspan="7" class="note">Belum ada pekerja.</td></tr>'}</tbody></table></div>`;
+}
+async function moveSelectedWorkers(dir){if(!S.selectedWorkers.size)return;const a=S.data.workers;if(dir<0){for(let i=1;i<a.length;i++)if(S.selectedWorkers.has(a[i].id)&&!S.selectedWorkers.has(a[i-1].id))[a[i-1],a[i]]=[a[i],a[i-1]]}else{for(let i=a.length-2;i>=0;i--)if(S.selectedWorkers.has(a[i].id)&&!S.selectedWorkers.has(a[i+1].id))[a[i],a[i+1]]=[a[i+1],a[i]]}await persist('Urutan pekerja diubah');render()}
