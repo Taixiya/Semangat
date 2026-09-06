@@ -183,3 +183,9 @@ html,body{min-height:100%;overscroll-behavior-y:none}body{min-width:320px}.app-s
 /* ===== v11 nested scroll chaining =====
    Modal scroll has priority. At its top/bottom, wheel input is handed to the page behind it. */
 .modal-card{overscroll-behavior-y:auto!important;}
+
+
+/* ===== v12 laptop wheel + natural nested scroll chaining ===== */
+html,body{overflow-y:auto!important;overscroll-behavior-y:auto!important;}
+.modal{overscroll-behavior-y:auto!important;}
+.modal-card{overscroll-behavior-y:auto!important;-webkit-overflow-scrolling:touch!important;}

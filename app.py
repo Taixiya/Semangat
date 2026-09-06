@@ -33,4 +33,4 @@ head_inject = "<style>" + STYLE + "</style>\n<script>window.NAYESO_CONFIG=" + js
 page = INDEX.replace("</head>", head_inject + "\n</head>")
 page = page.replace("</body>", "<script>" + APP + "</script>\n</body>")
 
-components.html(page, height=1350, scrolling=True)
+components.html(page, height=820, scrolling=True)

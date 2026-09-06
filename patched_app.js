@@ -274,50 +274,33 @@ function closeModal(){modal.classList.add('hidden');window._detailSelectedImage=
 function modalWheelScroll(e){
   if(modal.classList.contains('hidden'))return;
   const card=modal.querySelector('.modal-card');
-  if(!card||!card.contains(e.target))return;
+  if(!card)return;
   if(Math.abs(e.deltaY)<Math.abs(e.deltaX))return;
 
-  const dy=e.deltaY||0;
+  /* 노트북 터치패드/마우스 휠 모두 같은 방식으로 처리 */
+  let dy=e.deltaY||0;
+  if(e.deltaMode===1)dy*=32;
+  else if(e.deltaMode===2)dy*=Math.max(300,window.innerHeight*.85);
   if(!dy)return;
-  const maxInner=Math.max(0,card.scrollHeight-card.clientHeight);
-  const atTop=card.scrollTop<=1;
-  const atBottom=card.scrollTop>=maxInner-1;
-  const innerCanMove=(dy<0&&!atTop)||(dy>0&&!atBottom);
 
-  /* 1순위: 열린 창(모달) 내부 스크롤 */
-  if(maxInner>1&&innerCanMove){
-    e.preventDefault();
-    e.stopPropagation();
-    card.scrollTop=Math.max(0,Math.min(maxInner,card.scrollTop+dy));
+  /* 팝업 안에 포인터가 있으면 팝업 스크롤이 항상 1순위 */
+  if(card.contains(e.target)){
+    const maxInner=Math.max(0,card.scrollHeight-card.clientHeight);
+    const atTop=card.scrollTop<=1;
+    const atBottom=card.scrollTop>=maxInner-1;
+    const innerCanMove=(dy<0&&!atTop)||(dy>0&&!atBottom);
+    if(maxInner>1&&innerCanMove){
+      e.preventDefault();
+      e.stopPropagation();
+      card.scrollTop=Math.max(0,Math.min(maxInner,card.scrollTop+dy));
+      return;
+    }
+    /* 팝업이 끝에 닿으면 preventDefault를 하지 않는다.
+       브라우저의 기본 scroll chaining으로 바깥 페이지가 이어서 움직인다. */
     return;
   }
 
-  /* 2순위: 모달 끝에 도달하면 뒤쪽 페이지 스크롤로 자연스럽게 이어짐 */
-  e.preventDefault();
-  e.stopPropagation();
-
-  const root=document.scrollingElement||document.documentElement;
-  let moved=false;
-  if(root){
-    const maxOuter=Math.max(0,root.scrollHeight-root.clientHeight);
-    const outerCanMove=(dy<0&&root.scrollTop>1)||(dy>0&&root.scrollTop<maxOuter-1);
-    if(outerCanMove){
-      const before=root.scrollTop;
-      root.scrollTop=Math.max(0,Math.min(maxOuter,root.scrollTop+dy));
-      moved=Math.abs(root.scrollTop-before)>.5;
-    }
-  }
-
-  /* Streamlit에서는 앱이 iframe 안에 있으므로 바깥 Streamlit 페이지도 직접 이동 */
-  if(!moved){
-    try{
-      if(window.parent&&window.parent!==window){
-        window.parent.scrollBy(0,dy);
-      }
-    }catch(err){
-      /* parent 접근이 막힌 환경에서는 내부 페이지 스크롤만 사용 */
-    }
-  }
+  /* 팝업 바깥의 회색 배경에서는 바깥 페이지의 기본 스크롤을 그대로 허용 */
 }
 document.addEventListener('wheel',modalWheelScroll,{passive:false,capture:true});
 async function deleteRecord(type,id){if(!confirm('Hapus data ini?'))return;S.data[type]=S.data[type].filter(x=>x.id!==id);await persist('Data dihapus: '+type);closeModal();render()}
