@@ -126,7 +126,7 @@ function startCloudPolling(){
       if(!state?.data)return;
       if(state.updated_at&&S.remoteUpdatedAt&&String(state.updated_at)<=String(S.remoteUpdatedAt))return;
       S.data=state.data;normalize();S.baseData=cloneData(S.data);S.remoteUpdatedAt=state.updated_at||new Date().toISOString();saveLocal();
-      if(S.sessionRole)render();else renderLoginGateway();
+      v19RenderAfterBackgroundSync();
       setSync('Data terbaru diterapkan','ok');
     }catch(e){console.warn('CLOUD_POLL_ERROR',e)}
   },2000);
@@ -140,12 +140,12 @@ async function connectCloud(){
     const {data:states,error}=await S.supabase.from('app_state').select('data,updated_at').eq('id','main').limit(1);if(error)throw error;
     const state=Array.isArray(states)?states[0]:null;
     if(state?.data&&Object.keys(state.data).length){S.data=state.data;normalize();S.baseData=cloneData(S.data);S.remoteUpdatedAt=state.updated_at;saveLocal()}else{await migrateImagesToCloud();await S.supabase.from('app_state').upsert({id:'main',data:S.data,updated_at:new Date().toISOString()});S.baseData=cloneData(S.data)}
-    S.supabase.removeAllChannels();S.supabase.channel('nayeso-id-state').on('postgres_changes',{event:'*',schema:'public',table:'app_state',filter:'id=eq.main'},payload=>{if(!payload.new?.data)return;if(S.localDirty||S.syncing){S.pendingRemote=payload.new.data;setSync(`Ada perubahan lain · ${S.pendingSyncCount||1} menunggu sinkronisasi`,'pending');return}S.data=payload.new.data;normalize();S.baseData=cloneData(S.data);S.remoteUpdatedAt=payload.new.updated_at;saveLocal();if(S.sessionRole)render();else renderLoginGateway();setSync('Perubahan terbaru diterapkan','ok')}).subscribe(status=>{if(status==='SUBSCRIBED')setSync('DB bersama aktif · real-time','ok')});
+    S.supabase.removeAllChannels();S.supabase.channel('nayeso-id-state').on('postgres_changes',{event:'*',schema:'public',table:'app_state',filter:'id=eq.main'},payload=>{if(!payload.new?.data)return;if(S.localDirty||S.syncing){S.pendingRemote=payload.new.data;setSync(`Ada perubahan lain · ${S.pendingSyncCount||1} menunggu sinkronisasi`,'pending');return}S.data=payload.new.data;normalize();S.baseData=cloneData(S.data);S.remoteUpdatedAt=payload.new.updated_at;saveLocal();v19RenderAfterBackgroundSync();setSync('Perubahan terbaru diterapkan','ok')}).subscribe(status=>{if(status==='SUBSCRIBED')setSync('DB bersama aktif · real-time','ok')});
     startCloudPolling();
-    if(S.sessionRole)render();else renderLoginGateway();
+    v19RenderAfterBackgroundSync();
   }catch(e){console.error('SUPABASE_CONNECT_ERROR',e);S.cloud=false;setSync('Mode lokal','error');renderLoginGateway()}
 }
-async function refreshFromCloud(){if(!S.cloud||S.localDirty)return;const {data:states,error}=await S.supabase.from('app_state').select('data,updated_at').eq('id','main').limit(1);if(error){console.error(error);setSync('Gagal memuat cloud','error');return}const state=Array.isArray(states)?states[0]:null;if(state?.data){S.data=state.data;normalize();S.baseData=cloneData(S.data);S.remoteUpdatedAt=state.updated_at;saveLocal();if(S.sessionRole)render();else renderLoginGateway();setSync('Data terbaru dimuat','ok')}}
+async function refreshFromCloud(){if(!S.cloud||S.localDirty)return;const {data:states,error}=await S.supabase.from('app_state').select('data,updated_at').eq('id','main').limit(1);if(error){console.error(error);setSync('Gagal memuat cloud','error');return}const state=Array.isArray(states)?states[0]:null;if(state?.data){S.data=state.data;normalize();S.baseData=cloneData(S.data);S.remoteUpdatedAt=state.updated_at;saveLocal();v19RenderAfterBackgroundSync();setSync('Data terbaru dimuat','ok')}}
 async function manualSync(){
   if(S.syncing)return;
   if(!navigator.onLine){setSync(`Offline · belum tersinkron${S.pendingSyncCount?` ${S.pendingSyncCount}`:''}`,'error');return}
@@ -161,13 +161,21 @@ async function manualSync(){
   }catch(e){console.error(e);setSync('Pemeriksaan sinkronisasi gagal · tekan ↻ lagi','error')}
   finally{btn?.classList.remove('is-syncing');updateSyncCounter()}
 }
+function v19RenderAfterBackgroundSync(){
+  if(S.sessionRole){render();return}
+  // Initial cloud connection should show the gateway once.
+  // After the user chooses Admin/Umum, background polling/realtime must NOT
+  // redraw the login gateway while they are selecting a name or typing a password.
+  if(!S.loginView)renderLoginGateway();
+}
 function renderLoginGateway(msg=''){
+  S.loginView='gateway';
   document.getElementById('userBtn').classList.add('hidden');document.getElementById('searchBox').classList.add('hidden');meta('Login','Pilih jenis login');
   content.innerHTML=`<div class="login-shell"><div class="auth-card login-choice"><h2>SEMANGAT</h2><p class="note">Pilih cara masuk.</p>${msg?`<div class="alert">${esc(msg)}</div>`:''}<div class="login-choice-grid"><button class="login-big primary" onclick="renderWorkerLogin()"><b>Login Umum</b><span>Pekerja memilih nama lalu langsung masuk</span></button><button class="login-big secondary" onclick="renderAdminLogin()"><b>Login Admin</b><span>Pengaturan dan pengelolaan pengguna</span></button></div></div></div>`
 }
-function renderWorkerLogin(){meta('Login Umum','Pilih nama pekerja');const users=S.data.loginUsers.filter(x=>x.active!==false);content.innerHTML=`<div class="auth-card"><h2>Login Umum</h2><div class="field"><label>Nama Pekerja</label><select id="worker_login_name"><option value="">Pilih nama</option>${users.map(x=>`<option value="${esc(x.name)}">${esc(x.name)}</option>`).join('')}</select></div><div class="toolbar" style="margin-top:14px"><button class="primary" onclick="doWorkerLogin()">Masuk</button><button class="secondary" onclick="renderLoginGateway()">Kembali</button></div>${users.length?'':'<p class="note">Belum ada nama login. Admin harus menambahkan nama terlebih dahulu.</p>'}</div>`}
+function renderWorkerLogin(){S.loginView='worker';meta('Login Umum','Pilih nama pekerja');const users=S.data.loginUsers.filter(x=>x.active!==false);content.innerHTML=`<div class="auth-card"><h2>Login Umum</h2><div class="field"><label>Nama Pekerja</label><select id="worker_login_name"><option value="">Pilih nama</option>${users.map(x=>`<option value="${esc(x.name)}">${esc(x.name)}</option>`).join('')}</select></div><div class="toolbar" style="margin-top:14px"><button class="primary" onclick="doWorkerLogin()">Masuk</button><button class="secondary" onclick="renderLoginGateway()">Kembali</button></div>${users.length?'':'<p class="note">Belum ada nama login. Admin harus menambahkan nama terlebih dahulu.</p>'}</div>`}
 function doWorkerLogin(){const name=worker_login_name.value;if(!name)return alert('Pilih nama pekerja.');if(!S.data.loginUsers.some(x=>x.name===name&&x.active!==false))return alert('Nama ini tidak aktif.');S.sessionRole='worker';S.actorName=name;saveAppSession();S.page='dashboard';render()}
-function renderAdminLogin(msg=''){meta('Login Admin','Masukkan password Admin');content.innerHTML=`<div class="auth-card"><h2>Login Admin</h2>${msg?`<div class="alert">${esc(msg)}</div>`:''}<div class="field"><label>Password Admin</label><input id="admin_login_password" type="password" inputmode="numeric" autocomplete="current-password" onkeydown="if(event.key==='Enter')doAdminLogin()"></div><div class="toolbar" style="margin-top:14px"><button class="primary" onclick="doAdminLogin()">Masuk</button><button class="secondary" onclick="renderLoginGateway()">Kembali</button></div></div>`;setTimeout(()=>admin_login_password?.focus(),30)}
+function renderAdminLogin(msg=''){S.loginView='admin';meta('Login Admin','Masukkan password Admin');content.innerHTML=`<div class="auth-card"><h2>Login Admin</h2>${msg?`<div class="alert">${esc(msg)}</div>`:''}<div class="field"><label>Password Admin</label><input id="admin_login_password" type="password" inputmode="numeric" autocomplete="current-password" onkeydown="if(event.key==='Enter')doAdminLogin()"></div><div class="toolbar" style="margin-top:14px"><button class="primary" onclick="doAdminLogin()">Masuk</button><button class="secondary" onclick="renderLoginGateway()">Kembali</button></div></div>`;setTimeout(()=>admin_login_password?.focus(),30)}
 async function doAdminLogin(){const h=await hashText(admin_login_password.value);if(h!==adminHash())return renderAdminLogin('Password salah.');S.sessionRole='admin';S.actorName='';saveAppSession();S.page='dashboard';render()}
 function logout(){clearAppSession();document.getElementById('searchBox').classList.add('hidden');renderLoginGateway()}
 function openAccountMenu(){modalBody.innerHTML=`<h2>${isAdmin()?'Admin':'Pekerja'}</h2>${isAdmin()?'<p class="note">Mode Admin</p>':`<p><b>${esc(S.actorName)}</b></p>`}<button class="secondary" onclick="logout();closeModal()">Keluar</button>`;openModal()}
@@ -582,7 +590,7 @@ async function syncCloudState(){
     if(!verified)throw new Error('Perubahan belum dapat diverifikasi di server.');
     S.data=verified.data;normalize();S.baseData=cloneData(S.data);S.remoteUpdatedAt=verified.updated_at||new Date().toISOString();
     S.localDirty=false;S.pendingRemote=null;S.pendingSyncCount=0;S.lastSyncOkAt=Date.now();S.cloudReady=true;saveLocal();
-    if(S.sessionRole)render();else renderLoginGateway();
+    v19RenderAfterBackgroundSync();
     setSync('Tersinkron · data server terbaru','ok');return true;
   }catch(e){
     console.error('V15_SYNC_ERROR',e);S.localDirty=true;
@@ -619,11 +627,11 @@ async function connectCloud(){
         if(!payload.new?.data)return;
         if(S.localDirty||S.syncing){S.pendingRemote=payload.new.data;return}
         S.data=payload.new.data;normalize();S.baseData=cloneData(S.data);S.remoteUpdatedAt=payload.new.updated_at||new Date().toISOString();saveLocal();
-        if(S.sessionRole)render();else renderLoginGateway();setSync('Perubahan perangkat lain diterapkan','ok');
+        v19RenderAfterBackgroundSync();setSync('Perubahan perangkat lain diterapkan','ok');
       }).subscribe(status=>{if(status==='SUBSCRIBED')setSync('Tersinkron · real-time aktif','ok')});
     }catch(realtimeErr){console.warn('REALTIME_OPTIONAL_ERROR',realtimeErr)}
     startCloudPolling();
-    if(S.sessionRole)render();else renderLoginGateway();setSync('Tersinkron · data server terbaru','ok');
+    v19RenderAfterBackgroundSync();setSync('Tersinkron · data server terbaru','ok');
   }catch(e){
     console.error('V15_CONNECT_ERROR',e);S.cloud=false;S.cloudReady=false;
     setSync('Database tidak terhubung','error');
@@ -639,7 +647,7 @@ function startCloudPolling(){
       const state=await v15FetchMaster();if(!state?.data)return;
       if(state.updated_at&&S.remoteUpdatedAt&&String(state.updated_at)===String(S.remoteUpdatedAt))return;
       S.data=state.data;normalize();S.baseData=cloneData(S.data);S.remoteUpdatedAt=state.updated_at||new Date().toISOString();saveLocal();
-      if(S.sessionRole)render();else renderLoginGateway();setSync('Data terbaru diterapkan','ok');
+      v19RenderAfterBackgroundSync();setSync('Data terbaru diterapkan','ok');
     }catch(e){console.warn('V15_POLL_ERROR',e);setSync('Pemeriksaan server gagal · ↻','error')}
   },1500);
 }
@@ -649,7 +657,7 @@ async function refreshFromCloud(){
   try{
     setSync('Memuat data server…','syncing');const state=await v15FetchMaster();if(!state?.data)throw new Error('Data utama tidak ditemukan.');
     S.data=state.data;normalize();S.baseData=cloneData(S.data);S.remoteUpdatedAt=state.updated_at||new Date().toISOString();saveLocal();
-    if(S.sessionRole)render();else renderLoginGateway();S.lastSyncOkAt=Date.now();setSync('Tersinkron · data server terbaru','ok');return true;
+    v19RenderAfterBackgroundSync();S.lastSyncOkAt=Date.now();setSync('Tersinkron · data server terbaru','ok');return true;
   }catch(e){console.error('V15_REFRESH_ERROR',e);setSync('Gagal memuat data server · ↻','error');return false}
 }
 async function manualSync(){
@@ -661,7 +669,7 @@ async function manualSync(){
   finally{btn?.classList.remove('is-syncing');updateSyncCounter()}
 }
 async function init(){
-  load();buildNav();clearAppSession();S.cloudReady=false;
+  load();buildNav();clearAppSession();S.loginView=null;S.cloudReady=false;
   document.getElementById('searchBox').oninput=()=>render();document.getElementById('excelFile').onchange=handleExcel;document.getElementById('productImageInput').onchange=productImagePicked;document.getElementById('productCameraInput').onchange=productImagePicked;
   window.addEventListener('online',()=>{setSync('Online · sinkronisasi…','syncing');if(S.cloud){if(S.localDirty)syncCloudState();else refreshFromCloud()}else connectCloud()});
   window.addEventListener('offline',()=>setSync('Offline · perubahan belum tersinkron','error'));
