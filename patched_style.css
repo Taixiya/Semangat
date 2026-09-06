@@ -50,3 +50,26 @@ html,body{min-height:100%;overscroll-behavior-y:none}body{min-width:320px}.app-s
   .login-shell{padding-top:16px!important}
   .login-shell .auth-card{margin:0 auto!important}
 }
+
+/* ===== v6 modal position fix: dialogs open from top, not vertically centered/bottom ===== */
+.modal{
+  align-items:flex-start !important;
+  justify-content:center !important;
+  padding:96px 18px 24px !important;
+  overflow-y:auto !important;
+}
+.modal-card{
+  margin:0 auto !important;
+  max-height:calc(100dvh - 120px) !important;
+}
+@media(max-width:780px){
+  .modal{
+    align-items:flex-start !important;
+    padding:8px 0 calc(72px + env(safe-area-inset-bottom)) !important;
+  }
+  .modal-card{
+    margin:0 !important;
+    max-height:calc(100dvh - 82px - env(safe-area-inset-bottom)) !important;
+    border-radius:0 0 16px 16px !important;
+  }
+}
