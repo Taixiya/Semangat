@@ -9,7 +9,7 @@ const demo={...blank,workers:[{id:'w1',name:'Budi',workplace:'Pandaan',phone:'08
 const CFG=window.NAYESO_CONFIG||{};
 const storedSettings=JSON.parse(localStorage.getItem('nayeso_id_settings')||'{}');
 const initialSettings={url:CFG.SUPABASE_URL||storedSettings.url||'',key:CFG.SUPABASE_ANON_KEY||storedSettings.key||'',driveUrl:CFG.GOOGLE_DRIVE_GATEWAY_URL||storedSettings.driveUrl||'',driveToken:CFG.GOOGLE_DRIVE_GATEWAY_TOKEN||storedSettings.driveToken||''};
-let S={page:'dashboard',productView:'detail',pageSize:20,data:null,supabase:null,cloud:false,syncTimer:null,user:null,profile:null,sessionRole:null,actorName:'',settings:initialSettings,selectedProducts:new Set(),selectedBoxes:new Set(),selectedOrders:new Set(),selectedCompleted:new Set(),selectedInventory:new Set(),selectedWorkers:new Set(),selectedGroups:new Set(),productSort:'name',productGroupFilter:'all',baseData:null,localDirty:false,pendingRemote:null,syncing:false,remoteUpdatedAt:null};
+let S={page:'dashboard',productView:'detail',pageSize:20,data:null,supabase:null,cloud:false,syncTimer:null,cloudPollTimer:null,user:null,profile:null,sessionRole:null,actorName:'',settings:initialSettings,selectedProducts:new Set(),selectedBoxes:new Set(),selectedOrders:new Set(),selectedCompleted:new Set(),selectedInventory:new Set(),selectedWorkers:new Set(),selectedGroups:new Set(),productSort:'name',productGroupFilter:'all',baseData:null,localDirty:false,pendingRemote:null,syncing:false,remoteUpdatedAt:null};
 function normalize(){
   for(const k of Object.keys(blank))if(!Array.isArray(S.data[k]))S.data[k]=JSON.parse(JSON.stringify(blank[k]));
   for(const p of S.data.products){
@@ -73,8 +73,8 @@ async function syncCloudState(){
   }catch(e){console.error(e);setSync('Sinkronisasi gagal · data tersimpan lokal','error')}finally{S.syncing=false}
 }
 function normalizeFor(d){const old=S.data;S.data=d;normalize();d=S.data;S.data=old;return d}
-async function persist(label='Perubahan',detail=''){if(driveEnabled())await migrateImagesToCloud();const info=detail||buildChangeDetail(label);S.data.logs.unshift({id:uid(),at:new Date().toISOString(),label,detail:info,by:currentActor()});purgeOldLogs();saveLocal();if(S.cloud&&S.supabase){S.localDirty=true;setSync('Belum tersinkron…','pending');clearTimeout(S.syncTimer);S.syncTimer=setTimeout(syncCloudState,180)}}
-function buildNav(){const navItems=isAdmin()?NAV:NAV.filter(([k])=>k!=='settings');document.getElementById('nav').innerHTML=navItems.map(([k,v])=>`<button data-page="${k}">${v}</button>`).join('');document.getElementById('nav').onclick=e=>{if(e.target.dataset.page){S.page=e.target.dataset.page;render()}}}
+async function persist(label='Perubahan',detail=''){if(driveEnabled())await migrateImagesToCloud();const info=detail||buildChangeDetail(label);S.data.logs.unshift({id:uid(),at:new Date().toISOString(),label,detail:info,by:currentActor()});purgeOldLogs();saveLocal();if(S.cloud&&S.supabase){S.localDirty=true;setSync('Menyinkronkan…','syncing');clearTimeout(S.syncTimer);await syncCloudState()}}
+function buildNav(){const navItems=isAdmin()?NAV:NAV.filter(([k])=>k!=='settings');document.getElementById('nav').innerHTML=navItems.map(([k,v])=>`<button data-page="${k}">${v}</button>`).join('');document.getElementById('nav').onclick=e=>{if(e.target.dataset.page){S.page=e.target.dataset.page;closeMobileMenu();render()}}}
 async function init(){
   load();buildNav();restoreAppSession();
   document.getElementById('searchBox').oninput=()=>render();document.getElementById('excelFile').onchange=handleExcel;document.getElementById('productImageInput').onchange=productImagePicked;document.getElementById('productCameraInput').onchange=productImagePicked;
@@ -87,6 +87,24 @@ function saveAppSession(){sessionStorage.setItem('nayeso_id_app_session',JSON.st
 function clearAppSession(){sessionStorage.removeItem('nayeso_id_app_session');S.sessionRole=null;S.actorName=''}
 function renderCloudSetup(){renderLoginGateway()}
 async function firstCloudConnect(){}
+function startCloudPolling(){
+  clearInterval(S.cloudPollTimer);
+  S.cloudPollTimer=setInterval(async()=>{
+    if(!S.cloud||!S.supabase||S.localDirty||S.syncing||document.visibilityState==='hidden'||!navigator.onLine)return;
+    try{
+      const {data:states,error}=await S.supabase.from('app_state').select('data,updated_at').eq('id','main').limit(1);
+      if(error)throw error;
+      const state=Array.isArray(states)?states[0]:null;
+      if(!state?.data)return;
+      if(state.updated_at&&S.remoteUpdatedAt&&String(state.updated_at)<=String(S.remoteUpdatedAt))return;
+      S.data=state.data;normalize();S.baseData=cloneData(S.data);S.remoteUpdatedAt=state.updated_at||new Date().toISOString();saveLocal();
+      if(S.sessionRole)render();else renderLoginGateway();
+      setSync('Data terbaru diterapkan','ok');
+    }catch(e){console.warn('CLOUD_POLL_ERROR',e)}
+  },2000);
+}
+function toggleMobileMenu(){const sb=document.querySelector('.sidebar'),bd=document.getElementById('mobileMenuBackdrop');if(!sb)return;const open=!sb.classList.contains('mobile-open');sb.classList.toggle('mobile-open',open);bd?.classList.toggle('show',open)}
+function closeMobileMenu(){document.querySelector('.sidebar')?.classList.remove('mobile-open');document.getElementById('mobileMenuBackdrop')?.classList.remove('show')}
 async function connectCloud(){
   const {url,key}=S.settings;if(!url||!key){S.cloud=false;renderLoginGateway();return}
   try{
@@ -95,6 +113,7 @@ async function connectCloud(){
     const state=Array.isArray(states)?states[0]:null;
     if(state?.data&&Object.keys(state.data).length){S.data=state.data;normalize();S.baseData=cloneData(S.data);S.remoteUpdatedAt=state.updated_at;saveLocal()}else{await migrateImagesToCloud();await S.supabase.from('app_state').upsert({id:'main',data:S.data,updated_at:new Date().toISOString()});S.baseData=cloneData(S.data)}
     S.supabase.removeAllChannels();S.supabase.channel('nayeso-id-state').on('postgres_changes',{event:'*',schema:'public',table:'app_state',filter:'id=eq.main'},payload=>{if(!payload.new?.data)return;if(S.localDirty||S.syncing){S.pendingRemote=payload.new.data;setSync('Ada perubahan lain · menyinkronkan…','pending');return}S.data=payload.new.data;normalize();S.baseData=cloneData(S.data);S.remoteUpdatedAt=payload.new.updated_at;saveLocal();if(S.sessionRole)render();else renderLoginGateway();setSync('Perubahan terbaru diterapkan','ok')}).subscribe(status=>{if(status==='SUBSCRIBED')setSync('DB bersama aktif · real-time','ok')});
+    startCloudPolling();
     if(S.sessionRole)render();else renderLoginGateway();
   }catch(e){console.error('SUPABASE_CONNECT_ERROR',e);S.cloud=false;setSync('Mode lokal','error');renderLoginGateway()}
 }

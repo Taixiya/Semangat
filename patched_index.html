@@ -16,8 +16,10 @@
     <nav id="nav"></nav>
     <div id="syncBadge" class="sync-badge">Mode penyimpanan lokal</div>
   </aside>
+  <div id="mobileMenuBackdrop" class="mobile-menu-backdrop" onclick="closeMobileMenu()"></div>
   <main>
     <header class="topbar">
+      <button id="mobileMenuBtn" class="mobile-menu-btn" type="button" aria-label="Menu" onclick="toggleMobileMenu()">☰</button>
       <div><h1 id="pageTitle"></h1><p id="pageSub"></p></div>
       <div class="top-actions"><input id="searchBox" placeholder="Cari" /><button id="userBtn" class="user-btn hidden" onclick="openAccountMenu()"></button></div><div id="mobileSync" class="mobile-sync">Lokal</div>
     </header>
