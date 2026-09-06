@@ -178,3 +178,8 @@ html,body{min-height:100%;overscroll-behavior-y:none}body{min-width:320px}.app-s
 .worker-list-table table{min-width:900px}.worker-list-table th{text-align:center}.worker-list-table td{vertical-align:middle}
 @media(max-width:780px){.modal-sticky-head{padding:10px 44px 9px 0;align-items:flex-start}.modal-sticky-title h2{font-size:19px}.modal-sticky-actions{gap:5px}.modal-sticky-actions button{padding:8px 9px;font-size:11px}.product-detail-main{grid-template-columns:1fr;gap:14px}.product-detail-image{height:300px}.size-strip{grid-template-columns:1fr 1fr}.detail-info-list>div{grid-template-columns:110px 1fr}.order-document{padding:10px}.order-doc-meta{grid-template-columns:1fr}.order-doc-title{font-size:22px}.order-doc-tools button{flex:1 1 auto}.product-detail-note{padding:12px}}
 @media print{.modal-sticky-head{position:static!important;border:0!important}.modal-sticky-actions{display:none!important}}
+
+
+/* ===== v11 nested scroll chaining =====
+   Modal scroll has priority. At its top/bottom, wheel input is handed to the page behind it. */
+.modal-card{overscroll-behavior-y:auto!important;}
