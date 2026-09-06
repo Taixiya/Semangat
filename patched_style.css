@@ -73,3 +73,14 @@ html,body{min-height:100%;overscroll-behavior-y:none}body{min-width:320px}.app-s
     border-radius:0 0 16px 16px !important;
   }
 }
+
+
+/* ===== v7 modal wheel/scroll fix =====
+   Scroll belongs to the overlay, not only the card. This lets the mouse wheel work
+   even while the pointer is over form fields in long dialogs. */
+.modal{overflow-y:auto!important;overscroll-behavior:contain!important;}
+.modal-card{overflow:visible!important;max-height:none!important;}
+@media(max-width:780px){
+  .modal{overflow-y:auto!important;-webkit-overflow-scrolling:touch!important;}
+  .modal-card{overflow:visible!important;max-height:none!important;}
+}
