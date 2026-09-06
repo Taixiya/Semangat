@@ -36,3 +36,17 @@ html,body{min-height:100%;overscroll-behavior-y:none}body{min-width:320px}.app-s
 /* ===== v11 simple login / activity ===== */
 .login-shell{min-height:calc(100dvh - 170px);display:flex;align-items:center;justify-content:center}.login-choice{max-width:620px}.login-choice-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:18px}.login-big{min-height:120px;display:flex;flex-direction:column;justify-content:center;align-items:flex-start;gap:8px;text-align:left;padding:18px;border-radius:14px}.login-big b{font-size:20px}.login-big span{font-size:12px;opacity:.8}.activity-list{display:grid;gap:7px}.activity-row{width:100%;display:flex;align-items:center;justify-content:space-between;text-align:left;border:1px solid var(--line);background:#fff;border-radius:9px;padding:10px 12px}.activity-row span:first-child{display:flex;flex-direction:column;gap:3px}.activity-row small{color:var(--muted);font-weight:400}.hidden{display:none!important}
 @media(max-width:780px){.login-shell{min-height:calc(100dvh - 120px);align-items:flex-start;padding-top:12px}.login-choice-grid{grid-template-columns:1fr}.login-big{min-height:96px}.auth-card{width:100%;max-width:100%;box-sizing:border-box}.activity-row{padding:10px}}
+
+
+/* ===== v5 login/modal position fix ===== */
+/* Login should always start near the top of the visible app, not vertically centered in Streamlit's iframe. */
+.login-shell{min-height:auto!important;align-items:flex-start!important;justify-content:center!important;padding:28px 12px 24px!important}
+.login-shell .auth-card{margin:0 auto!important;width:min(620px,100%)!important}
+
+@media(max-width:780px){
+  /* Streamlit component uses a tall iframe. Bottom-sheet positioning can make dialogs appear below the phone viewport. */
+  .modal{align-items:flex-start!important;justify-content:center!important;padding:12px 0 calc(72px + env(safe-area-inset-bottom))!important;overflow-y:auto!important}
+  .modal-card{margin:0!important;width:100vw!important;max-width:none!important;max-height:none!important;min-height:0!important;border-radius:14px!important;padding:16px 12px calc(18px + env(safe-area-inset-bottom))!important}
+  .login-shell{padding-top:16px!important}
+  .login-shell .auth-card{margin:0 auto!important}
+}

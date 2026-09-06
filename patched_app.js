@@ -85,7 +85,7 @@ async function init(){
 function restoreAppSession(){try{const x=JSON.parse(sessionStorage.getItem('nayeso_id_app_session')||'null');if(x?.role==='admin'){S.sessionRole='admin';S.actorName=''}else if(x?.role==='worker'&&x?.name){S.sessionRole='worker';S.actorName=x.name}}catch{}}
 function saveAppSession(){sessionStorage.setItem('nayeso_id_app_session',JSON.stringify({role:S.sessionRole,name:S.actorName||''}))}
 function clearAppSession(){sessionStorage.removeItem('nayeso_id_app_session');S.sessionRole=null;S.actorName=''}
-function renderCloudSetup(){renderLoginGateway('Cloud belum dikonfigurasi. Program tetap bisa dites secara lokal. Untuk sinkronisasi HP/PC, isi config.js saat di-hosting.')}
+function renderCloudSetup(){renderLoginGateway()}
 async function firstCloudConnect(){}
 async function connectCloud(){
   const {url,key}=S.settings;if(!url||!key){S.cloud=false;renderLoginGateway();return}
@@ -96,7 +96,7 @@ async function connectCloud(){
     if(state?.data&&Object.keys(state.data).length){S.data=state.data;normalize();S.baseData=cloneData(S.data);S.remoteUpdatedAt=state.updated_at;saveLocal()}else{await migrateImagesToCloud();await S.supabase.from('app_state').upsert({id:'main',data:S.data,updated_at:new Date().toISOString()});S.baseData=cloneData(S.data)}
     S.supabase.removeAllChannels();S.supabase.channel('nayeso-id-state').on('postgres_changes',{event:'*',schema:'public',table:'app_state',filter:'id=eq.main'},payload=>{if(!payload.new?.data)return;if(S.localDirty||S.syncing){S.pendingRemote=payload.new.data;setSync('Ada perubahan lain · menyinkronkan…','pending');return}S.data=payload.new.data;normalize();S.baseData=cloneData(S.data);S.remoteUpdatedAt=payload.new.updated_at;saveLocal();if(S.sessionRole)render();else renderLoginGateway();setSync('Perubahan terbaru diterapkan','ok')}).subscribe(status=>{if(status==='SUBSCRIBED')setSync('DB bersama aktif · real-time','ok')});
     if(S.sessionRole)render();else renderLoginGateway();
-  }catch(e){console.error('SUPABASE_CONNECT_ERROR',e);S.cloud=false;setSync('Cloud belum tersambung · mode lokal','error');const msg=e?.message||e?.error_description||e?.details||String(e||'');renderLoginGateway('Koneksi cloud belum aktif. '+(msg?('Detail: '+msg):'Periksa pengaturan Supabase.'))}
+  }catch(e){console.error('SUPABASE_CONNECT_ERROR',e);S.cloud=false;setSync('Mode lokal','error');renderLoginGateway()}
 }
 async function refreshFromCloud(){if(!S.cloud||S.localDirty)return;const {data:states,error}=await S.supabase.from('app_state').select('data,updated_at').eq('id','main').limit(1);if(error){console.error(error);setSync('Gagal memuat cloud','error');return}const state=Array.isArray(states)?states[0]:null;if(state?.data){S.data=state.data;normalize();S.baseData=cloneData(S.data);S.remoteUpdatedAt=state.updated_at;saveLocal();if(S.sessionRole)render();else renderLoginGateway();setSync('Data terbaru dimuat','ok')}}
 function renderLoginGateway(msg=''){
