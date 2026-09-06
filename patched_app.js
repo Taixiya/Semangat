@@ -9,7 +9,7 @@ const demo={...blank,workers:[{id:'w1',name:'Budi',workplace:'Pandaan',phone:'08
 const CFG=window.NAYESO_CONFIG||{};
 const storedSettings=JSON.parse(localStorage.getItem('nayeso_id_settings')||'{}');
 const initialSettings={url:CFG.SUPABASE_URL||storedSettings.url||'',key:CFG.SUPABASE_ANON_KEY||storedSettings.key||'',driveUrl:CFG.GOOGLE_DRIVE_GATEWAY_URL||storedSettings.driveUrl||'',driveToken:CFG.GOOGLE_DRIVE_GATEWAY_TOKEN||storedSettings.driveToken||''};
-let S={page:'dashboard',productView:'detail',pageSize:20,data:null,supabase:null,cloud:false,syncTimer:null,cloudPollTimer:null,user:null,profile:null,sessionRole:null,actorName:'',settings:initialSettings,selectedProducts:new Set(),selectedBoxes:new Set(),selectedOrders:new Set(),selectedCompleted:new Set(),selectedInventory:new Set(),selectedWorkers:new Set(),selectedGroups:new Set(),productSort:'name',productGroupFilter:'all',baseData:null,localDirty:false,pendingRemote:null,syncing:false,remoteUpdatedAt:null};
+let S={page:'dashboard',productView:'detail',pageSize:20,data:null,supabase:null,cloud:false,syncTimer:null,cloudPollTimer:null,user:null,profile:null,sessionRole:null,actorName:'',settings:initialSettings,selectedProducts:new Set(),selectedBoxes:new Set(),selectedOrders:new Set(),selectedCompleted:new Set(),selectedInventory:new Set(),selectedWorkers:new Set(),selectedGroups:new Set(),productSort:'name',productGroupFilter:'all',baseData:null,localDirty:false,pendingRemote:null,syncing:false,remoteUpdatedAt:null,pendingSyncCount:0,lastSyncOkAt:null};
 function normalize(){
   for(const k of Object.keys(blank))if(!Array.isArray(S.data[k]))S.data[k]=JSON.parse(JSON.stringify(blank[k]));
   for(const p of S.data.products){
@@ -28,7 +28,13 @@ function normalize(){
 function load(){try{S.data=JSON.parse(localStorage.getItem('nayeso_id_data'))||JSON.parse(JSON.stringify(demo))}catch{S.data=JSON.parse(JSON.stringify(demo))}normalize()}
 function saveLocal(){localStorage.setItem('nayeso_id_data',JSON.stringify(S.data))}
 function cloneData(x){return JSON.parse(JSON.stringify(x))}
-function setSync(t,state=''){for(const id of ['syncBadge','mobileSync']){const el=document.getElementById(id);if(el){el.textContent=t;el.dataset.state=state}}}
+function updateSyncCounter(){
+  const count=document.getElementById('syncCount'),btn=document.getElementById('manualSyncBtn');
+  const n=Math.max(0,+S.pendingSyncCount||0);
+  if(count){count.textContent=String(n);count.classList.toggle('hidden',n===0)}
+  if(btn){btn.dataset.state=S.syncing?'syncing':(n>0?'pending':(S.cloud?'ok':'error'));btn.classList.toggle('is-syncing',!!S.syncing)}
+}
+function setSync(t,state=''){for(const id of ['syncBadge','mobileSync']){const el=document.getElementById(id);if(el){el.textContent=t;el.dataset.state=state}}updateSyncCounter()}
 function currentActor(){return S.sessionRole==='worker'?(S.actorName||'Pekerja'):''}
 function isAdmin(){return S.sessionRole==='admin'}
 function purgeOldLogs(){if(!S.data?.logs)return;const cutoff=Date.now()-90*24*60*60*1000;S.data.logs=S.data.logs.filter(l=>new Date(l.at||0).getTime()>=cutoff).sort((a,b)=>String(b.at||'').localeCompare(String(a.at||''))).slice(0,500)}
@@ -61,19 +67,41 @@ async function uploadImageToDrive(dataUrl,path){const m=String(dataUrl||'').matc
 async function uploadDataImage(dataUrl,path){if(!String(dataUrl||'').startsWith('data:image/'))return dataUrl;if(driveEnabled()){try{return await uploadImageToDrive(dataUrl,path)}catch(e){console.warn('Google Drive upload gagal',e)}}if(S.cloud&&S.supabase){try{const blob=dataUrlToBlob(dataUrl);const {error}=await S.supabase.storage.from('product-images').upload(path,blob,{upsert:true,contentType:blob.type,cacheControl:'3600'});if(error)throw error;const {data}=S.supabase.storage.from('product-images').getPublicUrl(path);return data.publicUrl||dataUrl}catch(e){console.warn('Supabase Storage upload gagal',e)}}return dataUrl}
 async function migrateImagesToCloud(){if(!driveEnabled()&&!S.cloud)return false;let changed=false;for(const p of S.data.products){if(String(p.image||'').startsWith('data:image/')){const before=p.image;p.image=await uploadDataImage(p.image,`products/${p.id}/main-${Date.now()}.jpg`);if(p.image!==before){p.imageSource=driveEnabled()?'google-drive':'cloud';changed=true}}for(const d of (p.details||[])){if(d.type==='image'&&String(d.src||'').startsWith('data:image/')){const before=d.src;d.src=await uploadDataImage(d.src,`products/${p.id}/details/${d.id||uid()}-${Date.now()}.jpg`);if(d.src!==before)changed=true}}}if(changed)saveLocal();return changed}
 async function syncCloudState(){
-  if(!S.cloud||!S.supabase||S.syncing)return;S.syncing=true;clearTimeout(S.syncTimer);setSync('Menyinkronkan…','syncing');
+  if(!S.cloud||!S.supabase||S.syncing)return false;
+  S.syncing=true;clearTimeout(S.syncTimer);setSync(`Menyinkronkan${S.pendingSyncCount?` · ${S.pendingSyncCount}`:''}…`,'syncing');
   try{
     await migrateImagesToCloud();
-    const {data:rows,error:readErr}=await S.supabase.from('app_state').select('data,updated_at').eq('id','main').limit(1);if(readErr)throw readErr;
-    const row=Array.isArray(rows)?rows[0]:null;
-    const remote=row?.data&&Object.keys(row.data).length?row.data:cloneData(blank);
-    const merged=mergeState(S.baseData||remote,S.data,remote);normalizeFor(merged);
-    const now=new Date().toISOString();const {error}=await S.supabase.from('app_state').upsert({id:'main',data:merged,updated_at:now});if(error)throw error;
-    S.data=merged;S.baseData=cloneData(merged);S.remoteUpdatedAt=now;S.localDirty=false;S.pendingRemote=null;saveLocal();setSync('Tersinkron · real-time','ok');
-  }catch(e){console.error(e);setSync('Sinkronisasi gagal · data tersimpan lokal','error')}finally{S.syncing=false}
+    let committed=null;
+    for(let attempt=0;attempt<4;attempt++){
+      const {data:rows,error:readErr}=await S.supabase.from('app_state').select('data,updated_at').eq('id','main').limit(1);if(readErr)throw readErr;
+      const row=Array.isArray(rows)?rows[0]:null;
+      const remote=row?.data&&Object.keys(row.data).length?row.data:cloneData(blank);
+      const merged=mergeState(S.baseData||remote,S.data,remote);normalizeFor(merged);
+      const now=new Date().toISOString();
+      if(row?.updated_at){
+        const {data:written,error:writeErr}=await S.supabase.from('app_state').update({data:merged,updated_at:now}).eq('id','main').eq('updated_at',row.updated_at).select('data,updated_at');
+        if(writeErr)throw writeErr;
+        if(Array.isArray(written)&&written.length){committed=written[0];break}
+        // Another device changed the shared row between our read and write. Re-read, merge, retry.
+        await new Promise(r=>setTimeout(r,80*(attempt+1)));
+        continue;
+      }else{
+        const {data:written,error:writeErr}=await S.supabase.from('app_state').upsert({id:'main',data:merged,updated_at:now}).select('data,updated_at');
+        if(writeErr)throw writeErr;committed=Array.isArray(written)?written[0]:written;break;
+      }
+    }
+    if(!committed)throw new Error('Data berubah di perangkat lain. Coba sinkronkan lagi.');
+    // Verification read: the counter is cleared only after the cloud confirms the write.
+    const {data:checkRows,error:checkErr}=await S.supabase.from('app_state').select('data,updated_at').eq('id','main').limit(1);if(checkErr)throw checkErr;
+    const check=Array.isArray(checkRows)?checkRows[0]:null;if(!check?.data)throw new Error('Verifikasi sinkronisasi gagal.');
+    S.data=check.data;normalize();S.baseData=cloneData(S.data);S.remoteUpdatedAt=check.updated_at;S.localDirty=false;S.pendingRemote=null;S.pendingSyncCount=0;S.lastSyncOkAt=Date.now();saveLocal();
+    if(S.sessionRole)render();
+    setSync('Tersinkron · real-time','ok');return true;
+  }catch(e){console.error(e);S.localDirty=true;setSync(`Belum tersinkron${S.pendingSyncCount?` · ${S.pendingSyncCount}`:''} · tekan ↻`,'error');return false}
+  finally{S.syncing=false;updateSyncCounter()}
 }
 function normalizeFor(d){const old=S.data;S.data=d;normalize();d=S.data;S.data=old;return d}
-async function persist(label='Perubahan',detail=''){if(driveEnabled())await migrateImagesToCloud();const info=detail||buildChangeDetail(label);S.data.logs.unshift({id:uid(),at:new Date().toISOString(),label,detail:info,by:currentActor()});purgeOldLogs();saveLocal();if(S.cloud&&S.supabase){S.localDirty=true;setSync('Menyinkronkan…','syncing');clearTimeout(S.syncTimer);await syncCloudState()}}
+async function persist(label='Perubahan',detail=''){if(driveEnabled())await migrateImagesToCloud();const info=detail||buildChangeDetail(label);S.data.logs.unshift({id:uid(),at:new Date().toISOString(),label,detail:info,by:currentActor()});purgeOldLogs();saveLocal();S.pendingSyncCount=(+S.pendingSyncCount||0)+1;S.localDirty=true;setSync(`Menyinkronkan · ${S.pendingSyncCount}…`,'syncing');if(S.cloud&&S.supabase){clearTimeout(S.syncTimer);await syncCloudState()}else setSync(`Belum tersinkron · ${S.pendingSyncCount}`,'error')}
 function buildNav(){const navItems=isAdmin()?NAV:NAV.filter(([k])=>k!=='settings');document.getElementById('nav').innerHTML=navItems.map(([k,v])=>`<button data-page="${k}">${v}</button>`).join('');document.getElementById('nav').onclick=e=>{if(e.target.dataset.page){S.page=e.target.dataset.page;closeMobileMenu();render()}}}
 async function init(){
   load();buildNav();restoreAppSession();
@@ -112,12 +140,27 @@ async function connectCloud(){
     const {data:states,error}=await S.supabase.from('app_state').select('data,updated_at').eq('id','main').limit(1);if(error)throw error;
     const state=Array.isArray(states)?states[0]:null;
     if(state?.data&&Object.keys(state.data).length){S.data=state.data;normalize();S.baseData=cloneData(S.data);S.remoteUpdatedAt=state.updated_at;saveLocal()}else{await migrateImagesToCloud();await S.supabase.from('app_state').upsert({id:'main',data:S.data,updated_at:new Date().toISOString()});S.baseData=cloneData(S.data)}
-    S.supabase.removeAllChannels();S.supabase.channel('nayeso-id-state').on('postgres_changes',{event:'*',schema:'public',table:'app_state',filter:'id=eq.main'},payload=>{if(!payload.new?.data)return;if(S.localDirty||S.syncing){S.pendingRemote=payload.new.data;setSync('Ada perubahan lain · menyinkronkan…','pending');return}S.data=payload.new.data;normalize();S.baseData=cloneData(S.data);S.remoteUpdatedAt=payload.new.updated_at;saveLocal();if(S.sessionRole)render();else renderLoginGateway();setSync('Perubahan terbaru diterapkan','ok')}).subscribe(status=>{if(status==='SUBSCRIBED')setSync('DB bersama aktif · real-time','ok')});
+    S.supabase.removeAllChannels();S.supabase.channel('nayeso-id-state').on('postgres_changes',{event:'*',schema:'public',table:'app_state',filter:'id=eq.main'},payload=>{if(!payload.new?.data)return;if(S.localDirty||S.syncing){S.pendingRemote=payload.new.data;setSync(`Ada perubahan lain · ${S.pendingSyncCount||1} menunggu sinkronisasi`,'pending');return}S.data=payload.new.data;normalize();S.baseData=cloneData(S.data);S.remoteUpdatedAt=payload.new.updated_at;saveLocal();if(S.sessionRole)render();else renderLoginGateway();setSync('Perubahan terbaru diterapkan','ok')}).subscribe(status=>{if(status==='SUBSCRIBED')setSync('DB bersama aktif · real-time','ok')});
     startCloudPolling();
     if(S.sessionRole)render();else renderLoginGateway();
   }catch(e){console.error('SUPABASE_CONNECT_ERROR',e);S.cloud=false;setSync('Mode lokal','error');renderLoginGateway()}
 }
 async function refreshFromCloud(){if(!S.cloud||S.localDirty)return;const {data:states,error}=await S.supabase.from('app_state').select('data,updated_at').eq('id','main').limit(1);if(error){console.error(error);setSync('Gagal memuat cloud','error');return}const state=Array.isArray(states)?states[0]:null;if(state?.data){S.data=state.data;normalize();S.baseData=cloneData(S.data);S.remoteUpdatedAt=state.updated_at;saveLocal();if(S.sessionRole)render();else renderLoginGateway();setSync('Data terbaru dimuat','ok')}}
+async function manualSync(){
+  if(S.syncing)return;
+  if(!navigator.onLine){setSync(`Offline · belum tersinkron${S.pendingSyncCount?` ${S.pendingSyncCount}`:''}`,'error');return}
+  if(!S.cloud||!S.supabase){setSync('Cloud tidak terhubung','error');return}
+  const btn=document.getElementById('manualSyncBtn');btn?.classList.add('is-syncing');
+  try{
+    if(S.localDirty||S.pendingSyncCount>0){await syncCloudState();return}
+    setSync('Memeriksa data terbaru…','syncing');
+    const {data:states,error}=await S.supabase.from('app_state').select('data,updated_at').eq('id','main').limit(1);if(error)throw error;
+    const state=Array.isArray(states)?states[0]:null;
+    if(state?.data){S.data=state.data;normalize();S.baseData=cloneData(S.data);S.remoteUpdatedAt=state.updated_at;saveLocal();if(S.sessionRole)render();else renderLoginGateway()}
+    S.lastSyncOkAt=Date.now();setSync('Sinkronisasi diperiksa · terbaru','ok');
+  }catch(e){console.error(e);setSync('Pemeriksaan sinkronisasi gagal · tekan ↻ lagi','error')}
+  finally{btn?.classList.remove('is-syncing');updateSyncCounter()}
+}
 function renderLoginGateway(msg=''){
   document.getElementById('userBtn').classList.add('hidden');document.getElementById('searchBox').classList.add('hidden');meta('Login','Pilih jenis login');
   content.innerHTML=`<div class="login-shell"><div class="auth-card login-choice"><h2>SEMANGAT</h2><p class="note">Pilih cara masuk.</p>${msg?`<div class="alert">${esc(msg)}</div>`:''}<div class="login-choice-grid"><button class="login-big primary" onclick="renderWorkerLogin()"><b>Login Umum</b><span>Pekerja memilih nama lalu langsung masuk</span></button><button class="login-big secondary" onclick="renderAdminLogin()"><b>Login Admin</b><span>Pengaturan dan pengelolaan pengguna</span></button></div></div></div>`

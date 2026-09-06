@@ -241,3 +241,11 @@ html,body{overflow-y:auto!important;overscroll-behavior-y:auto!important;}
   .dashboard-products,.gallery{grid-template-columns:repeat(2,minmax(0,1fr))!important}
   .gallery-card img,.gallery-card .noimg{height:88px!important}
 }
+
+
+/* ===== v14 AppSheet-style sync indicator / manual sync ===== */
+.manual-sync-btn{position:relative;width:38px;height:38px;padding:0;border:1px solid var(--line);border-radius:10px;background:#fff;color:#475569;display:inline-flex;align-items:center;justify-content:center;font-size:20px;line-height:1;cursor:pointer;flex:0 0 auto}
+.manual-sync-btn:hover{background:#f8fafc}.manual-sync-btn[data-state="ok"]{color:#047857}.manual-sync-btn[data-state="pending"],.manual-sync-btn[data-state="syncing"]{color:#1d4ed8}.manual-sync-btn[data-state="error"]{color:#c2410c}
+.sync-count{position:absolute;right:-6px;top:-7px;min-width:19px;height:19px;padding:0 5px;border-radius:999px;background:#2563eb;color:#fff;font-size:10px;font-weight:800;display:flex;align-items:center;justify-content:center;border:2px solid #fff;box-sizing:border-box}.sync-count.hidden{display:none!important}
+.manual-sync-btn.is-syncing .sync-icon{display:inline-block;animation:v14syncspin .8s linear infinite}@keyframes v14syncspin{to{transform:rotate(360deg)}}
+@media(max-width:780px){.manual-sync-btn{width:34px;height:34px;border-radius:9px;font-size:18px}.sync-count{right:-5px;top:-6px}.top-actions{gap:6px}}

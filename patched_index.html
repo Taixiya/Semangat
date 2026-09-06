@@ -21,7 +21,7 @@
     <header class="topbar">
       <button id="mobileMenuBtn" class="mobile-menu-btn" type="button" aria-label="Menu" onclick="toggleMobileMenu()">☰</button>
       <div><h1 id="pageTitle"></h1><p id="pageSub"></p></div>
-      <div class="top-actions"><input id="searchBox" placeholder="Cari" /><button id="userBtn" class="user-btn hidden" onclick="openAccountMenu()"></button></div><div id="mobileSync" class="mobile-sync">Lokal</div>
+      <div class="top-actions"><input id="searchBox" placeholder="Cari" /><button id="manualSyncBtn" class="manual-sync-btn" type="button" onclick="manualSync()" title="Sinkronkan sekarang" aria-label="Sinkronkan sekarang"><span class="sync-icon">↻</span><span id="syncCount" class="sync-count hidden">0</span></button><button id="userBtn" class="user-btn hidden" onclick="openAccountMenu()"></button></div><div id="mobileSync" class="mobile-sync">Lokal</div>
     </header>
     <section id="content" class="content"></section>
   </main>
