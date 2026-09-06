@@ -134,3 +134,35 @@ html,body{min-height:100%;overscroll-behavior-y:none}body{min-width:320px}.app-s
   .product-print-head{grid-template-columns:52mm 1fr;gap:8mm}
   .product-print-image{width:52mm;height:44mm}
 }
+
+
+/* ===== v9 Samsung Notes style detail editor + transparent product image ===== */
+.upload-preview,.thumb,.gallery-img,.product-print-image,.product-print-image img{background:#fff!important}
+.detail-note-shell{border:1px solid #d7dde6;border-radius:14px;background:#eef1f5;padding:10px;margin-top:8px}
+.detail-note-top{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:4px 4px 10px}
+.detail-note-toolbar,.detail-image-tools{display:flex;align-items:center;gap:5px;flex-wrap:wrap;background:#fff;border:1px solid #d8dee8;border-radius:10px;padding:7px 8px;margin-bottom:8px;box-shadow:0 1px 2px rgba(15,23,42,.04)}
+.detail-note-toolbar button,.detail-image-tools button{border:0;background:#fff;border-radius:7px;padding:7px 9px;min-height:34px}
+.detail-note-toolbar button:hover,.detail-image-tools button:hover{background:#eef2f7}
+.detail-note-toolbar select{border:0;background:#fff;padding:7px 8px;border-radius:7px;min-height:34px}
+.detail-tool-divider{width:1px;height:22px;background:#d8dee8;display:inline-block;margin:0 2px}
+.detail-image-tools{background:#f8fafc;border-color:#bfdbfe}
+.detail-image-tools>span:first-child{font-size:12px;font-weight:700;color:#1d4ed8;margin-right:4px}
+.detail-note-paper{background:#fff;border-radius:10px;border:1px solid #d9dee6;box-shadow:0 2px 8px rgba(15,23,42,.06);overflow:hidden}
+.detail-page-editor{min-height:680px!important;padding:34px 38px!important;border:0!important;border-radius:0!important;box-shadow:none!important;background:#fff!important;font-size:15px;line-height:1.75;outline:none}
+.detail-page-editor:empty:before{content:attr(data-placeholder);color:#9ca3af;pointer-events:none}
+.detail-page-editor p,.detail-page-editor div{margin-top:0}
+.detail-page-editor img.detail-rich-img{display:inline-block;max-width:100%;height:auto;background:transparent!important;vertical-align:middle;margin:8px 0;cursor:pointer;border:2px solid transparent;border-radius:7px}
+.detail-page-editor img.detail-selected{border-color:#2563eb!important;box-shadow:0 0 0 3px rgba(37,99,235,.15)}
+.detail-image-line{display:block;width:100%;margin:12px 0;min-height:20px}
+@media(max-width:780px){
+  .detail-note-shell{padding:7px;border-radius:11px}
+  .detail-note-top{align-items:flex-start;flex-direction:column}
+  .detail-note-toolbar,.detail-image-tools{position:sticky;top:0;z-index:5;overflow-x:auto;flex-wrap:nowrap;-webkit-overflow-scrolling:touch}
+  .detail-note-toolbar button,.detail-image-tools button,.detail-note-toolbar select{flex:0 0 auto;white-space:nowrap}
+  .detail-page-editor{min-height:560px!important;padding:20px 16px!important;font-size:14px}
+}
+@media print{
+  .detail-note-shell,.detail-note-paper{border:0!important;box-shadow:none!important;background:#fff!important;padding:0!important}
+  .detail-note-top,.detail-note-toolbar,.detail-image-tools{display:none!important}
+  .detail-page-editor{min-height:0!important;padding:0!important}
+}
