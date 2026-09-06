@@ -136,7 +136,7 @@ function closeMobileMenu(){document.querySelector('.sidebar')?.classList.remove(
 async function connectCloud(){
   const {url,key}=S.settings;if(!url||!key){S.cloud=false;renderLoginGateway();return}
   try{
-    S.supabase=window.supabase.createClient(url,key,{auth:{persistSession:false,autoRefreshToken:false,detectSessionInUrl:false}});S.cloud=true;
+    const baseUrl=v17NormalizeSupabaseUrl(url);S.settings.url=baseUrl;S.supabase=window.supabase.createClient(baseUrl,key,{auth:{persistSession:false,autoRefreshToken:false,detectSessionInUrl:false}});S.cloud=true;
     const {data:states,error}=await S.supabase.from('app_state').select('data,updated_at').eq('id','main').limit(1);if(error)throw error;
     const state=Array.isArray(states)?states[0]:null;
     if(state?.data&&Object.keys(state.data).length){S.data=state.data;normalize();S.baseData=cloneData(S.data);S.remoteUpdatedAt=state.updated_at;saveLocal()}else{await migrateImagesToCloud();await S.supabase.from('app_state').upsert({id:'main',data:S.data,updated_at:new Date().toISOString()});S.baseData=cloneData(S.data)}
@@ -526,15 +526,33 @@ function v15LocalChangesSatisfied(base,local,cloud){
   if(!same(base.groups||[],local.groups||[])&&!same(cloud.groups||[],local.groups||[]))return false;
   return true;
 }
+function v17NormalizeSupabaseUrl(raw){
+  let u=String(raw||'').trim().replace(/\/+$/,'');
+  u=u.replace(/\/rest\/v1(?:\/.*)?$/i,'');
+  if(!/^https:\/\/[a-z0-9.-]+\.supabase\.co$/i.test(u)){
+    throw new Error('Alamat SUPABASE_URL tidak valid. Gunakan alamat proyek seperti https://xxxxx.supabase.co');
+  }
+  return u;
+}
+function v17RestHeaders(extra={}){
+  const key=String(S.settings.key||'').trim();
+  return {'apikey':key,'Authorization':'Bearer '+key,'Content-Type':'application/json',...extra};
+}
 async function v15FetchMaster(){
-  const {data:rows,error}=await S.supabase.from('app_state').select('data,updated_at').eq('id','main').limit(1);
-  if(error)throw error;
+  const base=v17NormalizeSupabaseUrl(S.settings.url);
+  const res=await fetch(base+'/rest/v1/app_state?id=eq.main&select=data,updated_at',{method:'GET',headers:v17RestHeaders({'Accept':'application/json'}),cache:'no-store'});
+  const text=await res.text();
+  if(!res.ok)throw new Error(`Supabase GET ${res.status}: ${text||res.statusText}`);
+  let rows=[];try{rows=text?JSON.parse(text):[]}catch{throw new Error('Jawaban Supabase tidak dapat dibaca.')}
   return Array.isArray(rows)?rows[0]:rows;
 }
 async function v15WriteMaster(data){
+  const base=v17NormalizeSupabaseUrl(S.settings.url);
   const payload={id:'main',data,updated_at:new Date().toISOString()};
-  const {data:rows,error}=await S.supabase.from('app_state').upsert(payload).select('data,updated_at');
-  if(error)throw error;
+  const res=await fetch(base+'/rest/v1/app_state?on_conflict=id',{method:'POST',headers:v17RestHeaders({'Prefer':'resolution=merge-duplicates,return=representation'}),body:JSON.stringify(payload)});
+  const text=await res.text();
+  if(!res.ok)throw new Error(`Supabase SAVE ${res.status}: ${text||res.statusText}`);
+  let rows=[];try{rows=text?JSON.parse(text):[]}catch{throw new Error('Jawaban penyimpanan Supabase tidak dapat dibaca.')}
   const row=Array.isArray(rows)?rows[0]:rows;
   if(!row?.data)throw new Error('Server tidak mengembalikan data setelah penyimpanan.');
   return row;
@@ -587,7 +605,7 @@ async function connectCloud(){
   try{
     setSync('Menghubungkan database…','syncing');
     if(!window.supabase?.createClient)throw new Error('Library Supabase tidak dapat dimuat. Periksa internet.');
-    S.supabase=window.supabase.createClient(url,key,{auth:{persistSession:false,autoRefreshToken:false,detectSessionInUrl:false}});S.cloud=true;
+    const baseUrl=v17NormalizeSupabaseUrl(url);S.settings.url=baseUrl;S.supabase=window.supabase.createClient(baseUrl,key,{auth:{persistSession:false,autoRefreshToken:false,detectSessionInUrl:false}});S.cloud=true;
     let state=await v15FetchMaster();
     if(!state?.data||!Object.keys(state.data).length){
       // One-time migration: only seed the empty server from an existing meaningful local dataset.
