@@ -38,13 +38,8 @@ function normalizeData(){
   S.data.customers.forEach(c=>{c.business_no=c.business_no||'';c.business_doc_name=c.business_doc_name||'';c.business_doc_data=c.business_doc_data||''});
   if(!Array.isArray(S.data.invoice_templates)||!S.data.invoice_templates.length)S.data.invoice_templates=clone(DEMO.invoice_templates);
 }
-function loadLocal(){
-  try{const raw=localStorage.getItem('nayeso_korea_data_v25')||localStorage.getItem('nayeso_data_v2')||localStorage.getItem('nayeso_data');S.data=raw?JSON.parse(raw):clone(V25_EMPTY);}
-  catch{S.data=clone(V25_EMPTY)}
-  normalizeData();
-}
-
-function saveLocal(){try{localStorage.setItem('nayeso_korea_data_v25',JSON.stringify(S.data));localStorage.setItem('nayeso_korea_recovery_v25',JSON.stringify({saved_at:new Date().toISOString(),data:S.data}))}catch(e){console.warn('LOCAL_SAVE',e)}}
+function loadLocal(){S.data=JSON.parse(localStorage.getItem('nayeso_data_v2')||localStorage.getItem('nayeso_data')||'null')||clone(DEMO);normalizeData()}
+function saveLocal(){localStorage.setItem('nayeso_data_v2',JSON.stringify(S.data))}
 function money(n){return Number(n||0).toLocaleString('ko-KR')}
 function uid(prefix='id'){return prefix+Date.now()+Math.random().toString(16).slice(2)}
 function imgTag(p,cls=''){return p.image?`<img class="${cls}" src="${p.image}">`:`<div class="img-placeholder ${cls}">NO IMAGE</div>`}
@@ -109,8 +104,30 @@ async function deleteSelectedCustomers(){
 function productSelectBox(id){return `<input class="row-check" type="checkbox" ${S.selectedProducts.has(id)?'checked':''} onclick="event.stopPropagation()" onchange="toggleSetItem('selectedProducts','${id}',this.checked)">`}
 function customerSelectBox(id){return `<input class="row-check" type="checkbox" ${S.selectedCustomers.has(id)?'checked':''} onchange="toggleSetItem('selectedCustomers','${id}',this.checked)">`}
 
-async function initCloud(){return v25ConnectCloud()}
-async function persist(label='변경사항'){return v25Persist(label)}
+async function initCloud(){
+  const cfg=JSON.parse(localStorage.getItem('nayeso_supabase')||'null');
+  if(!cfg?.url||!cfg?.key)return;
+  try{
+    S.supabase=supabase.createClient(cfg.url,cfg.key);
+    const {data,error}=await S.supabase.from('app_state').select('payload').eq('id',1).single();
+    if(error)throw error;
+    if(data?.payload && Object.keys(data.payload).length){S.data=data.payload;normalizeData();S.cloud=true;document.getElementById('syncState').textContent='클라우드 실시간 동기화';render()}
+    else {S.cloud=true;await persist()}
+    S.supabase.channel('nayeso-state').on('postgres_changes',{event:'UPDATE',schema:'public',table:'app_state',filter:'id=eq.1'},payload=>{if(payload.new?.payload){S.data=payload.new.payload;normalizeData();render()}}).subscribe();
+  }catch(e){console.warn(e);document.getElementById('syncState').textContent='클라우드 연결 실패 / 로컬 모드'}
+}
+async function persist(){saveLocal();if(S.cloud&&S.supabase)await S.supabase.from('app_state').upsert({id:1,payload:S.data,updated_at:new Date().toISOString()})}
+
+document.getElementById('nav').addEventListener('click',e=>{if(e.target.dataset.page){S.page=e.target.dataset.page;render()}});
+document.getElementById('globalSearch').addEventListener('keydown',e=>{if(e.key==='Enter'){S.page='search';render();renderSearch(e.target.value)}});
+
+function setPageMeta(title,sub){document.getElementById('pageTitle').textContent=title;document.getElementById('pageSub').textContent=sub;document.querySelectorAll('.page').forEach(x=>x.classList.remove('active'));document.getElementById('page-'+S.page).classList.add('active');document.querySelectorAll('#nav button').forEach(b=>b.classList.toggle('active',b.dataset.page===S.page));const newBtn=document.getElementById('topNewProductBtn');if(newBtn)newBtn.classList.toggle('hidden',S.page!=='products')}
+function go(p){S.page=p;render()}
+function render(){
+  if(!S.data)return;
+  renderDashboard();renderProducts();renderInventory();renderCustomers();renderInvoice();renderSearch('');renderSettings();
+  const meta={dashboard:['메인 대시보드','제품·재고·거래를 한곳에서 관리합니다.'],products:['제품 DB','Deck / Table / Gallery 보기와 Excel 대량 업로드'],inventory:['재고관리','제품 이미지와 위치별 재고를 함께 확인합니다.'],customers:['지점 / 고객 정보','사업자정보와 관련 문서까지 함께 보관합니다.'],invoice:['거래명세표','기본 양식 또는 저장한 양식으로 작성합니다.'],search:['통합검색','제품·고객·거래명세표를 한 번에 검색합니다.'],settings:['설정 / 백업','클라우드 동기화와 백업을 설정합니다.']};setPageMeta(...meta[S.page]);
+}
 
 function renderDashboard(){
   document.getElementById('page-dashboard').innerHTML=`<div class="grid cols-4">
@@ -1242,71 +1259,134 @@ render=function(){ensureV13Data();if(S.page==='allocation'){
   renderDashboard();renderProducts();renderInventory();renderCustomers();renderInvoice();renderSearch('');renderSettings();renderAllocationV13();setPageMeta('출고 정리','저장된 거래명세표의 제품을 실제 재고 위치에서 차감합니다.');return;
 } _v13RenderBase();renderAllocationV13();}
 
-/* ===== v25 CLEAN SYNC: SEMANGAT-style shared Supabase state ===== */
-const V25_EMPTY={products:[],locations:[{id:'l1',name:'창고'},{id:'l2',name:'매장 1F'},{id:'l3',name:'매장 2F'}],inventory:[],customers:[],invoices:[],stock_logs:[],invoice_templates:clone(DEMO.invoice_templates),app_users:[],change_logs:[],trash_products:[],trash_invoices:[],stock_allocations:[],allocation_history:[],return_allocations:[],return_history:[],photo_out_history:[]};
-function v25EnsureState(){
-  S.syncing=!!S.syncing;S.localDirty=!!S.localDirty;S.pendingSyncCount=Number(S.pendingSyncCount||0);S.remoteUpdatedAt=S.remoteUpdatedAt||null;S.baseData=S.baseData||null;S.cloudPollTimer=S.cloudPollTimer||null;S.lastSyncOkAt=S.lastSyncOkAt||null;
-  const cfg=window.NAYESO_CONFIG||{};S.settings=S.settings||{};S.settings.url=String(cfg.SUPABASE_URL||S.settings.url||'').trim();S.settings.key=String(cfg.SUPABASE_ANON_KEY||S.settings.key||'').trim();
+/* ===== v14 Streamlit + Supabase direct REST sync ===== */
+const KOREA_CFG = window.NAYESO_CONFIG || {};
+S.cloudReadyV14=false;
+S.cloudBusyV14=false;
+S.remoteUpdatedAtV14='';
+S.localDirtyV14=false;
+S.pendingSyncV14=0;
+S.cloudPollV14=null;
+
+function ensureV14Auth(){
+  ensureV13Data?.();
+  if(!S.data.auth || typeof S.data.auth!=='object') S.data.auth={};
+  if(!S.data.auth.admin_password) S.data.auth.admin_password='1082';
 }
-function v25Clone(x){return JSON.parse(JSON.stringify(x))}
-function v25HasMeaningfulData(d){return !!d && ['products','inventory','customers','invoices','stock_logs','stock_allocations','return_history','photo_out_history'].some(k=>Array.isArray(d[k])&&d[k].length>0)}
-function v25KeyFor(k,x){if(!x||typeof x!=='object')return null;return x.id??(k==='inventory'?x.product_id:null)??null}
-function v25Same(a,b){return JSON.stringify(a)===JSON.stringify(b)}
-function v25MergeArray(k,base,local,remote){
-  const keyed=(arr)=>Array.isArray(arr)&&arr.every(x=>!x||typeof x!=='object'||v25KeyFor(k,x)!=null);
-  if(!keyed(local)||!keyed(remote)||!keyed(base))return !v25Same(base,local)?v25Clone(local):v25Clone(remote);
-  const bm=new Map((base||[]).filter(Boolean).map(x=>[String(v25KeyFor(k,x)),x]));
-  const lm=new Map((local||[]).filter(Boolean).map(x=>[String(v25KeyFor(k,x)),x]));
-  const rm=new Map((remote||[]).filter(Boolean).map(x=>[String(v25KeyFor(k,x)),x]));
-  for(const [id,b] of bm){if(!lm.has(id))rm.delete(id);else if(!v25Same(lm.get(id),b))rm.set(id,lm.get(id))}
-  for(const [id,l] of lm)if(!bm.has(id))rm.set(id,l);
-  return [...rm.values()]
+getAdminPassword=function(){ ensureV14Auth(); return String(S.data.auth.admin_password||'1082'); }
+doAdminLogin=function(){
+  ensureV14Auth();
+  const pw=String(document.getElementById('adminPw')?.value||'').trim();
+  if(pw!==getAdminPassword()) return alert('비밀번호가 맞지 않습니다.');
+  finishLogin({role:'admin',id:'admin',name:'관리자'});
 }
-function v25MergeState(base,local,remote){
-  base=base||v25Clone(V25_EMPTY);local=local||v25Clone(V25_EMPTY);remote=remote||v25Clone(V25_EMPTY);const out=v25Clone(remote);
-  const keys=new Set([...Object.keys(base),...Object.keys(local),...Object.keys(remote)]);
-  for(const k of keys){const b=base[k],l=local[k],r=remote[k];if(Array.isArray(l)||Array.isArray(r)||Array.isArray(b))out[k]=v25MergeArray(k,b||[],l||[],r||[]);else if(!v25Same(b,l))out[k]=v25Clone(l);}
-  return out
+changeAdminPassword=async function(){
+  ensureV14Auth();
+  const current=String(document.getElementById('admin-current-pw')?.value||'');
+  const next=String(document.getElementById('admin-new-pw')?.value||'');
+  const next2=String(document.getElementById('admin-new-pw2')?.value||'');
+  if(current!==getAdminPassword())return alert('현재 비밀번호가 맞지 않습니다.');
+  if(next.length<4)return alert('새 비밀번호는 4자리 이상 입력하세요.');
+  if(next!==next2)return alert('새 비밀번호 확인이 일치하지 않습니다.');
+  S.data.auth.admin_password=next;
+  try{localStorage.removeItem('nayeso_admin_pw');localStorage.removeItem('nayeso_admin_pw_v6');localStorage.removeItem('nayeso_admin_pw_v7')}catch(e){}
+  addChangeLog?.('관리자 설정','관리자 비밀번호 변경');
+  await persist();
+  alert('관리자 비밀번호가 변경되었습니다.');
+  renderSettings();
 }
-function v25NormalizeInto(d){const old=S.data;S.data=d;normalizeData();ensureV10Data?.();ensureV12Data?.();ensureV15Data?.();ensureV17Data?.();ensureV18Data?.();const out=S.data;S.data=old;return out}
-function v25SyncLabel(text,state=''){const side=document.getElementById('syncState'),top=document.getElementById('topSyncText'),mob=document.getElementById('mobileSyncText'),btn=document.getElementById('manualSyncBtn');for(const el of [side,top,mob])if(el){el.textContent=text;el.dataset.state=state}if(btn){btn.dataset.state=state;btn.classList.toggle('is-syncing',state==='syncing')}const cnt=document.getElementById('syncCount');if(cnt){cnt.textContent=String(S.pendingSyncCount||0);cnt.classList.toggle('hidden',!(S.pendingSyncCount>0))}}
-function v25RenderSafe(){try{render()}catch(e){console.error('RENDER_AFTER_SYNC',e)}}
-async function v25ReadRemote(){const {data,error}=await S.supabase.from('app_state').select('data,updated_at').eq('id','main').limit(1);if(error)throw error;return Array.isArray(data)?data[0]:null}
-async function v25SyncNow(){
-  v25EnsureState();if(!S.cloud||!S.supabase||S.syncing)return false;S.syncing=true;v25SyncLabel(`동기화 중${S.pendingSyncCount?` · ${S.pendingSyncCount}`:''}…`,'syncing');
+
+function v14BaseUrl(){
+  let u=String(KOREA_CFG.SUPABASE_URL||'').trim().replace(/\/+$/,'');
+  u=u.replace(/\/rest\/v1.*$/,'');
+  return u;
+}
+function v14Key(){return String(KOREA_CFG.SUPABASE_ANON_KEY||'').trim()}
+function v14Headers(extra={}){
+  const key=v14Key();
+  return Object.assign({'apikey':key,'Authorization':'Bearer '+key,'Content-Type':'application/json'},extra);
+}
+function v14SetSync(text,state=''){
+  const el=document.getElementById('syncState');
+  if(el){el.textContent=text;el.dataset.state=state}
+}
+function v14ValidConfig(){return /^https:\/\/[^/]+\.supabase\.co$/i.test(v14BaseUrl()) && v14Key().length>20}
+function v14ServerDataLooksValid(d){return d && typeof d==='object' && Array.isArray(d.products) && Array.isArray(d.inventory)}
+async function v14RestRead(){
+  const r=await fetch(v14BaseUrl()+'/rest/v1/app_state?id=eq.main&select=data,updated_at',{method:'GET',headers:v14Headers({'Accept':'application/json'}),cache:'no-store'});
+  if(!r.ok)throw new Error('DB 읽기 실패 '+r.status+' '+await r.text());
+  const a=await r.json(); return Array.isArray(a)?a[0]:null;
+}
+async function v14RestWrite(){
+  const payload={id:'main',data:S.data,updated_at:new Date().toISOString()};
+  const r=await fetch(v14BaseUrl()+'/rest/v1/app_state?on_conflict=id',{method:'POST',headers:v14Headers({'Prefer':'resolution=merge-duplicates,return=representation'}),body:JSON.stringify(payload)});
+  if(!r.ok)throw new Error('DB 저장 실패 '+r.status+' '+await r.text());
+  const a=await r.json(); return Array.isArray(a)?a[0]:null;
+}
+async function v14SyncNow(){
+  if(!S.cloudReadyV14||S.cloudBusyV14||!navigator.onLine)return false;
+  S.cloudBusyV14=true;
   try{
-    let committed=null;
-    for(let attempt=0;attempt<4;attempt++){
-      const row=await v25ReadRemote();const remote=row?.data&&Object.keys(row.data).length?row.data:v25Clone(V25_EMPTY);const merged=v25MergeState(S.baseData||remote,S.data,remote);v25NormalizeInto(merged);const stamp=new Date().toISOString();
-      if(row?.updated_at){const {data,error}=await S.supabase.from('app_state').update({data:merged,updated_at:stamp}).eq('id','main').eq('updated_at',row.updated_at).select('data,updated_at');if(error)throw error;if(Array.isArray(data)&&data.length){committed=data[0];break}await new Promise(r=>setTimeout(r,100*(attempt+1)));}
-      else{const {data,error}=await S.supabase.from('app_state').upsert({id:'main',data:merged,updated_at:stamp}).select('data,updated_at');if(error)throw error;committed=Array.isArray(data)?data[0]:data;break}
+    v14SetSync(`동기화 중${S.pendingSyncV14?` · ${S.pendingSyncV14}`:''}`,'syncing');
+    const saved=await v14RestWrite();
+    S.remoteUpdatedAtV14=saved?.updated_at||new Date().toISOString();
+    S.localDirtyV14=false;S.pendingSyncV14=0;
+    saveLocal();v14SetSync('자동 동기화 완료','ok');return true;
+  }catch(e){console.error(e);v14SetSync('동기화 실패 · 재시도 예정','error');return false}
+  finally{S.cloudBusyV14=false}
+}
+async function v14Refresh(){
+  if(!S.cloudReadyV14||S.cloudBusyV14||S.localDirtyV14||!navigator.onLine)return;
+  S.cloudBusyV14=true;
+  try{
+    const row=await v14RestRead();
+    if(row?.data && v14ServerDataLooksValid(row.data)){
+      if(!S.remoteUpdatedAtV14 || row.updated_at!==S.remoteUpdatedAtV14){
+        S.data=row.data;normalizeData();ensureV13Data?.();ensureV14Auth();pruneHistory?.();
+        S.remoteUpdatedAtV14=row.updated_at||'';saveLocal();
+        try{render();applyRoleUI?.()}catch(e){console.error('render after cloud refresh',e)}
+      }
     }
-    if(!committed)throw new Error('다른 기기에서 동시에 변경되어 다시 동기화가 필요합니다.');
-    const check=await v25ReadRemote();if(!check?.data)throw new Error('서버 저장 확인에 실패했습니다.');
-    S.data=check.data;normalizeData();ensureV18Data?.();S.baseData=v25Clone(S.data);S.remoteUpdatedAt=check.updated_at;S.localDirty=false;S.pendingSyncCount=0;S.lastSyncOkAt=Date.now();saveLocal();v25RenderSafe();v25SyncLabel(`동기화 완료 · ${new Date().toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit',second:'2-digit'})}`,'ok');return true;
-  }catch(e){console.error('SYNC_ERROR',e);S.localDirty=true;v25SyncLabel(`동기화 실패 · ↻ 다시 시도`,'error');return false}
-  finally{S.syncing=false;const b=document.getElementById('manualSyncBtn');b?.classList.remove('is-syncing')}
+    v14SetSync('자동 동기화','ok');
+  }catch(e){console.error(e);v14SetSync('클라우드 확인 실패','error')}
+  finally{S.cloudBusyV14=false}
 }
-async function v25Persist(label='변경사항'){
-  v25EnsureState();saveLocal();S.pendingSyncCount=(S.pendingSyncCount||0)+1;S.localDirty=true;v25SyncLabel(`저장 중 · ${S.pendingSyncCount}`,'syncing');if(S.cloud&&S.supabase)return await v25SyncNow();v25SyncLabel('서버 연결 안 됨 · 기기에 임시 저장','error');return false
+
+// Final persist override: local recovery cache + immediate verified server save.
+persist=async function(){
+  ensureV13Data?.();ensureV14Auth();pruneHistory?.();
+  saveLocal();S.localDirtyV14=true;S.pendingSyncV14=(S.pendingSyncV14||0)+1;
+  if(S.cloudReadyV14) await v14SyncNow();
+  else v14SetSync('서버 연결 대기','syncing');
 }
-async function v25RefreshFromCloud(force=false){if(!S.cloud||!S.supabase||S.syncing||(!force&&S.localDirty))return false;try{const row=await v25ReadRemote();if(!row?.data)return false;if(!force&&row.updated_at&&S.remoteUpdatedAt&&String(row.updated_at)<=String(S.remoteUpdatedAt))return true;S.data=row.data;normalizeData();ensureV18Data?.();S.baseData=v25Clone(S.data);S.remoteUpdatedAt=row.updated_at;saveLocal();v25RenderSafe();v25SyncLabel(`최신 데이터 · ${new Date().toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit',second:'2-digit'})}`,'ok');return true}catch(e){console.warn('REFRESH_ERROR',e);v25SyncLabel('동기화 확인 실패 · ↻','error');return false}}
-async function manualSync(){v25EnsureState();if(!navigator.onLine)return v25SyncLabel('오프라인 · 기기에 임시 저장','error');if(!S.cloud||!S.supabase)return v25ConnectCloud();if(S.localDirty||S.pendingSyncCount>0)return v25SyncNow();v25SyncLabel('최신 데이터 확인 중…','syncing');return v25RefreshFromCloud(true)}
-function v25StartPolling(){clearInterval(S.cloudPollTimer);S.cloudPollTimer=setInterval(()=>{if(document.visibilityState==='visible'&&navigator.onLine&&!S.localDirty&&!S.syncing)v25RefreshFromCloud(false)},2000)}
-async function v25ConnectCloud(){
-  v25EnsureState();const url=S.settings.url,key=S.settings.key;if(!url||!key){S.cloud=false;v25SyncLabel('Supabase 설정 필요','error');return false}
-  try{v25SyncLabel('공용 데이터 연결 중…','syncing');S.supabase=window.supabase.createClient(url,key,{auth:{persistSession:false,autoRefreshToken:false,detectSessionInUrl:false}});S.cloud=true;const row=await v25ReadRemote();
-    if(row?.data&&v25HasMeaningfulData(row.data)){S.data=row.data;normalizeData();ensureV18Data?.();S.baseData=v25Clone(S.data);S.remoteUpdatedAt=row.updated_at;saveLocal()}
-    else if(v25HasMeaningfulData(S.data)){const stamp=new Date().toISOString();const {error}=await S.supabase.from('app_state').upsert({id:'main',data:S.data,updated_at:stamp});if(error)throw error;S.baseData=v25Clone(S.data);S.remoteUpdatedAt=stamp}
-    else{S.data=v25Clone(V25_EMPTY);normalizeData();S.baseData=v25Clone(S.data);saveLocal()}
-    try{S.supabase.removeAllChannels();S.supabase.channel('nayeso-korea-v25').on('postgres_changes',{event:'*',schema:'public',table:'app_state',filter:'id=eq.main'},payload=>{if(!payload.new?.data||S.syncing||S.localDirty)return;S.data=payload.new.data;normalizeData();ensureV18Data?.();S.baseData=v25Clone(S.data);S.remoteUpdatedAt=payload.new.updated_at;saveLocal();v25RenderSafe();v25SyncLabel('실시간 동기화 완료','ok')}).subscribe()}catch(e){console.warn('REALTIME_OPTIONAL',e)}
-    v25StartPolling();v25RenderSafe();v25SyncLabel('동기화 완료 · 공용 데이터','ok');return true;
-  }catch(e){console.error('CONNECT_ERROR',e);S.cloud=false;v25SyncLabel('연결 실패 · ↻ 다시 시도','error');return false}
+
+async function v14ConnectCloud(){
+  if(!v14ValidConfig()){
+    v14SetSync('클라우드 설정 필요','error');
+    if(KOREA_CFG.REQUIRE_CLOUD) console.error('Streamlit Secrets의 SUPABASE_URL / SUPABASE_KEY를 확인하세요.');
+    return;
+  }
+  try{
+    v14SetSync('클라우드 연결 중…','syncing');
+    const row=await v14RestRead();
+    S.cloudReadyV14=true;S.cloud=true;
+    if(row?.data && v14ServerDataLooksValid(row.data)){
+      S.data=row.data;normalizeData();ensureV13Data?.();ensureV14Auth();pruneHistory?.();
+      S.remoteUpdatedAtV14=row.updated_at||'';saveLocal();render();applyRoleUI?.();
+    }else{
+      // First deployment: seed cloud with the current local/default data.
+      ensureV13Data?.();ensureV14Auth();await v14SyncNow();
+    }
+    v14SetSync('자동 동기화','ok');
+    clearInterval(S.cloudPollV14);S.cloudPollV14=setInterval(()=>{if(S.localDirtyV14)v14SyncNow();else v14Refresh()},1500);
+  }catch(e){console.error(e);v14SetSync('클라우드 연결 실패','error')}
 }
-window.addEventListener('online',()=>{v25SyncLabel('온라인 · 동기화 중…','syncing');if(S.cloud){if(S.localDirty)v25SyncNow();else v25RefreshFromCloud(true)}else v25ConnectCloud()});
-window.addEventListener('offline',()=>v25SyncLabel('오프라인 · 기기에 임시 저장','error'));
-document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&navigator.onLine){if(S.localDirty)v25SyncNow();else v25RefreshFromCloud(true)}});
-/* ===== /v25 CLEAN SYNC ===== */
+
+window.addEventListener('online',()=>{v14SetSync('온라인 · 동기화 중','syncing');if(S.cloudReadyV14){if(S.localDirtyV14)v14SyncNow();else v14Refresh()}else v14ConnectCloud()});
+window.addEventListener('offline',()=>v14SetSync('오프라인 · 기기에 임시 저장','error'));
+document.addEventListener('visibilitychange',()=>{if(!document.hidden&&S.cloudReadyV14){if(S.localDirtyV14)v14SyncNow();else v14Refresh()}});
+
+document.addEventListener('DOMContentLoaded',()=>setTimeout(v14ConnectCloud,180));
 
 /* ===== v15 partial returns + return stock allocation + Excel return marker ===== */
 function ensureV15Data(){
@@ -1488,7 +1568,7 @@ function ensureV18Data(){
   ensureV17Data();
   if(!Array.isArray(S.data.photo_out_history))S.data.photo_out_history=[];
   if(!S.productSelectionFilter)S.productSelectionFilter='all';
-  if(!['detail','name','image','large','medium','small','deck'].includes(S.productView))S.productView='medium';
+  if(!['detail','name','image','deck'].includes(S.productView))S.productView='detail';
 }
 function v18SelectionFiltered(ps){return S.productSelectionFilter==='selected'?ps.filter(p=>S.selectedProducts.has(p.id)):ps}
 function v18ProductSize(p){const a=[p.w||p.W,p.d||p.D,p.h||p.H].map(v=>String(v??'').trim());return a.some(Boolean)?a.map(v=>v||'-').join(' × '):''}
@@ -1562,26 +1642,165 @@ const _v18RenderBase=render;
 render=function(){ensureV18Data();_v18RenderBase();if(S.page==='products')renderProducts();if(S.page==='inventory')renderInventory();if(S.page==='allocation'){renderAllocationV15();setPageMeta('출고 정리','거래 출고·반품 또는 사진 메모로 재고를 정리합니다.')}}
 
 
+/* ===== v19 bulk import progress/result + compact product view selector ===== */
+function v19FmtTime(sec){sec=Math.max(0,Math.round(Number(sec)||0));if(sec<60)return `${sec}초`;const m=Math.floor(sec/60),s=sec%60;return `${m}분 ${s}초`}
+function v19SetImportProgress(done,total,start,label='등록 중'){
+  const box=document.getElementById('bulkProgressV19');if(!box)return;const elapsed=Math.max(.1,(Date.now()-start)/1000),rate=done/elapsed,pct=total?Math.round(done/total*100):0,remain=rate>0?(total-done)/rate:0;
+  box.classList.remove('hidden');box.innerHTML=`<div class="bulk-progress-head-v19"><b>${label}</b><strong>${done} / ${total} · ${pct}%</strong></div><div class="bulk-progress-bar-v19"><i style="width:${pct}%"></i></div><div class="bulk-progress-stats-v19"><span>경과 ${v19FmtTime(elapsed)}</span><span>${rate.toFixed(rate<10?1:0)}개/초</span><span>예상 남은시간 ${done>=total?'0초':v19FmtTime(remain)}</span></div>`;
+}
+triggerExcel=function(){
+  document.getElementById('modalBody').innerHTML=`<h2>Excel + 이미지 대량등록</h2><div class="card bulk-import-card"><p><b>1.</b> Excel 파일을 선택하고 <b>2.</b> Excel에 적은 이미지 파일들을 한 번에 선택하세요.</p><p class="muted">대표이미지는 Excel의 <b>대표이미지</b> 열 파일명과 자동 연결됩니다. 파일명이 맞지 않으면 완료 결과에서 누락 제품을 확인할 수 있습니다.</p><div class="toolbar"><button class="secondary" onclick="downloadProductTemplate()">등록용 Excel 양식 다운로드</button></div><label>Excel 파일<input id="bulkExcel" type="file" accept=".xlsx,.xls,.csv"></label><label>이미지 파일들<input id="bulkImages" type="file" accept="image/*" multiple></label><div class="muted">필요한 대표/상세 이미지를 모두 한 번에 선택하세요.</div><div id="bulkProgressV19" class="bulk-progress-v19 hidden"></div><div id="bulkResultV19"></div><div class="toolbar" style="margin-top:16px"><button id="bulkRunV19" class="primary" onclick="runBulkImport()">대량등록 실행</button><button class="secondary" onclick="closeModal()">닫기</button></div></div>`;document.getElementById('modal').classList.remove('hidden')
+}
+runBulkImport=async function(){
+  const xf=document.getElementById('bulkExcel')?.files?.[0];if(!xf)return alert('Excel 파일을 선택하세요.');
+  const run=document.getElementById('bulkRunV19');if(run){run.disabled=true;run.textContent='등록 진행 중...'}
+  const imgs=[...(document.getElementById('bulkImages')?.files||[])],imageMap=new Map(imgs.map(f=>[f.name.trim().toLowerCase(),f]));
+  const arr=await xf.arrayBuffer(),wb=XLSX.read(arr,{type:'array'}),rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{defval:''}),total=rows.length,start=Date.now();
+  const readImg=f=>new Promise(res=>{const r=new FileReader();r.onload=()=>res(r.result);r.onerror=()=>res('');r.readAsDataURL(f)});
+  let add=0,upd=0,imgLinked=0,skipped=0,failed=0;const missing=[],errors=[];v19SetImportProgress(0,total,start,'등록 준비 중');
+  for(let ri=0;ri<rows.length;ri++){
+    const row=rows[ri];try{
+      const name=String(row['제품명']||row.name||'').trim();if(!name){skipped++;errors.push(`${ri+2}행: 제품명 없음`);v19SetImportProgress(ri+1,total,start);continue}
+      let p=S.data.products.find(x=>x.name===name),isNew=!p;if(!p)p={id:uid('p'),image:'',detail_notes:[],note_height:620,detail_sections:[],detail_ko:'',detail_id:'',detail_en:''};
+      Object.assign(p,{name,group:row['그룹']||row.group||'',material:row['수종']||row['소재']||row.material||'',finish:row['마감']||row.finish||'',weight_g:+(row['무게(g)']||row.weight_g||0),w:+(row.W||row.w||0),d:+(row.D||row.d||0),h:+(row.H||row.h||0),cost:+(row['원가']||row.cost||0),branch_price:+(row['지점가']||row.branch_price||0),wholesale_price:+(row['1차 도매가']||row.wholesale_price||0),sale_price:+(row['판매가']||row.sale_price||0)});p.cbm=+(row.CBM||row.cbm||0)||((p.w*p.d*p.h)/1e9);
+      const mainRaw=String(row['대표이미지']||row['이미지']||row.image||'').trim(),mainName=mainRaw.toLowerCase();if(mainName){if(imageMap.has(mainName)){p.image=await readImg(imageMap.get(mainName));imgLinked++}else missing.push(`${name} — ${mainRaw}`)}
+      const notes=[];let y=20;for(let i=1;i<=20;i++){const txt=String(row['상세텍스트'+i]||'').trim();if(txt){notes.push({type:'text',text:txt,x:360,y,w:300,h:120});y+=140}const raw=String(row['상세이미지'+i]||'').trim(),nm=raw.toLowerCase();if(nm){if(imageMap.has(nm)){const data=await readImg(imageMap.get(nm));notes.push({type:'image',data,x:20,y:Math.max(20,y-140),w:300,h:220});imgLinked++;y+=240}else missing.push(`${name} — ${raw}`)}}
+      if(notes.length){p.detail_notes=notes;p.note_height=Math.max(620,y+40)}if(isNew){S.data.products.push(p);S.data.inventory.push({product_id:p.id,updated_at:now()});add++}else upd++;
+    }catch(e){failed++;errors.push(`${ri+2}행: ${String(e?.message||e)}`)}v19SetImportProgress(ri+1,total,start);await new Promise(r=>setTimeout(r,0));
+  }
+  v19SetImportProgress(total,total,start,'서버 저장 및 동기화 중');let syncOK=true;try{await persist()}catch(e){syncOK=false;errors.push(`서버 저장: ${String(e?.message||e)}`)}render();v19SetImportProgress(total,total,start,syncOK?'등록 및 저장 완료':'등록 완료 · 서버 동기화 확인 필요');
+  const result=document.getElementById('bulkResultV19');if(result)result.innerHTML=`<div class="bulk-result-v19 ${syncOK?'ok':'warn'}"><h3>${syncOK?'✓ 대량등록 완료':'⚠ 등록 완료 · 동기화 확인 필요'}</h3><div class="bulk-result-grid-v19"><span>Excel 행 <b>${total}</b></span><span>신규 <b>${add}</b></span><span>업데이트 <b>${upd}</b></span><span>이미지 연결 <b>${imgLinked}</b></span><span>이미지 누락 <b>${missing.length}</b></span><span>건너뜀/실패 <b>${skipped+failed}</b></span></div>${missing.length?`<details><summary>이미지 누락 항목 보기 (${missing.length})</summary><div class="bulk-issue-list-v19">${missing.map(x=>`<div>${escapeHtml(x)}</div>`).join('')}</div></details>`:''}${errors.length?`<details><summary>건너뜀/오류 항목 보기 (${errors.length})</summary><div class="bulk-issue-list-v19">${errors.map(x=>`<div>${escapeHtml(x)}</div>`).join('')}</div></details>`:''}</div>`;
+  if(run){run.disabled=false;run.textContent='다시 대량등록'}
+}
+function v19ViewSelect(){return `<label class="view-select-v19"><select onchange="S.productView=this.value;renderProducts()"><option value="detail" ${S.productView==='detail'?'selected':''}>큰 아이콘</option><option value="name" ${S.productView==='name'?'selected':''}>보통 아이콘</option><option value="image" ${S.productView==='image'?'selected':''}>작은 아이콘</option><option value="deck" ${S.productView==='deck'?'selected':''}>목록 (Deck)</option></select></label>`}
+const _v19ProductCard=v18ProductCard;
+v18ProductCard=function(p,mode){if(mode==='deck'){const selected=S.selectedProducts.has(p.id)?' selected-product-v18':'';return `<div class="product-deck-row-v19 ${p.discontinued?'discontinued-card':''}${selected}" onclick="openProduct('${p.id}')"><div>${productSelectBox(p.id)}</div><div class="deck-thumb-v19">${imgTag(p)}</div><div><b>${productNameHtml(p)}</b><small>${escapeHtml(p.group||'')} ${p.material?'· '+escapeHtml(p.material):''}</small></div><div>총수량 <b>${totalQty(p.id)}</b></div></div>`}return _v19ProductCard(p,mode)}
+const _renderProductsV19=renderProducts;
+renderProducts=function(){if(!['detail','name','image','deck'].includes(S.productView))S.productView='name';_renderProductsV19();const row=document.querySelector('#page-products .view-row-v18');if(row){const grp=row.querySelector('.view-folder-group-v18');if(grp)grp.outerHTML=v19ViewSelect()}const grid=document.querySelector('#page-products .product-grid');if(grid&&S.productView==='deck')grid.classList.add('deck-list-v19')}
 
-function fileToDataURL(file){return new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(r.result);r.onerror=()=>reject(r.error||new Error('이미지 읽기 실패'));r.readAsDataURL(file)})}
-/* ===== v25 CLEAN UI: fixed product controls, four views, mobile-safe ===== */
-function v25ProductSize(p){const vals=[p.w,p.d,p.h].map(v=>String(v??'').trim());return vals.some(Boolean)?vals.map(v=>v||'-').join(' × '):'-'}
-function v25ProductInfo(p){return {size:v25ProductSize(p),material:p.material||'-',finish:p.finish||'-',group:p.group||'-',qty:totalQty(p.id)}}
-function v25ProductCard(p,mode){const x=v25ProductInfo(p),sel=S.selectedProducts.has(p.id)?' selected-product-v25':'',disc=p.discontinued?' discontinued-card':'';return `<article class="v25-product-card mode-${mode}${disc}${sel}" onclick="openProduct('${p.id}')"><div class="v25-card-check">${productSelectBox(p.id)}</div><div class="v25-card-image">${imgTag(p)}</div><div class="v25-card-info"><b class="v25-card-name">${productNameHtml(p)}</b><div class="v25-card-size">${escapeHtml(x.size)} mm</div><div class="v25-card-meta">${escapeHtml(x.material)} · ${escapeHtml(x.finish)}</div><div class="v25-card-meta">${escapeHtml(x.group)} · 총수량 <strong>${x.qty}</strong></div></div></article>`}
-function v25Deck(ps){return `<div class="v25-deck-wrap"><table class="v25-deck"><thead><tr><th>선택</th><th>이미지</th><th>제품명</th><th>그룹</th><th>규격</th><th>수종/소재</th><th>마감</th><th>총수량</th><th>수정</th></tr></thead><tbody>${ps.map(p=>{const x=v25ProductInfo(p);return `<tr><td>${productSelectBox(p.id)}</td><td>${p.image?`<img src="${p.image}">`:'<div class="img-placeholder">NO</div>'}</td><td><b>${productNameHtml(p)}</b></td><td>${escapeHtml(x.group)}</td><td>${escapeHtml(x.size)} mm</td><td>${escapeHtml(x.material)}</td><td>${escapeHtml(x.finish)}</td><td><b>${x.qty}</b></td><td><button class="secondary" onclick="event.stopPropagation();openProduct('${p.id}')">수정</button></td></tr>`}).join('')}</tbody></table></div>`}
-function v25NormalizeView(){const map={detail:'large',name:'medium',image:'small',gallery:'large'};S.productView=map[S.productView]||S.productView||'medium';if(!['large','medium','small','deck'].includes(S.productView))S.productView='medium'}
+
+/* ===== v20 product view exact layouts ===== */
+function v20IdName(p){return p.name_id||p.name_idn||p.name_indonesia||p.indonesian_name||p.detail_id||''}
+function v20Spec(p){const a=[p.w||p.W,p.d||p.D,p.h||p.H].map(v=>String(v??'').trim());return a.some(Boolean)?a.map(v=>v||'-').join('×'):''}
+function v20Stop(e){e.stopPropagation()}
+function v20EditBtn(p){return `<button class="product-edit-v20" onclick="event.stopPropagation();openProduct('${p.id}')">수정</button>`}
+function v20Card(p,mode){
+  const selected=S.selectedProducts.has(p.id)?' selected-product-v18':'';
+  const name=productNameHtml(p), spec=v20Spec(p), mat=escapeHtml(p.material||''), fin=escapeHtml(p.finish||''), grp=escapeHtml(p.group||'');
+  const info=`<div class="v20-card-name"><b>${name}</b></div><div class="v20-card-line">${grp?grp+' · ':''}${spec||'-'}</div><div class="v20-card-line">${mat||'-'}${fin?' / '+fin:''}</div>`;
+  return `<div class="product-card folder-card product-card-v20 product-card-${mode}-v20 ${p.discontinued?'discontinued-card':''}${selected}" onclick="openProduct('${p.id}')"><div class="card-select" onclick="event.stopPropagation()">${productSelectBox(p.id)}</div><div class="folder-image">${imgTag(p)}</div><div class="body">${info}${v20EditBtn(p)}</div></div>`
+}
+function v20Deck(ps){
+  return `<div class="table-wrap product-deck-table-v20"><table><thead><tr><th class="select-col"></th><th>이미지</th><th>한국명</th><th>인니명</th><th>그룹</th><th>규격</th><th>수종</th><th>마감</th><th></th></tr></thead><tbody>${ps.map(p=>`<tr class="${p.discontinued?'discontinued-card':''}" onclick="openProduct('${p.id}')"><td onclick="event.stopPropagation()">${productSelectBox(p.id)}</td><td class="deck-img-cell-v20">${imgTag(p)}</td><td><b>${productNameHtml(p)}</b></td><td>${escapeHtml(v20IdName(p)||'-')}</td><td>${escapeHtml(p.group||'-')}</td><td>${escapeHtml(v20Spec(p)||'-')}</td><td>${escapeHtml(p.material||'-')}</td><td>${escapeHtml(p.finish||'-')}</td><td>${v20EditBtn(p)}</td></tr>`).join('')}</tbody></table></div>`
+}
 renderProducts=function(){
-  ensureV18Data();v25NormalizeView();let ps=sortedProducts();if(S.productSelectionFilter==='selected')ps=ps.filter(p=>S.selectedProducts.has(p.id));const shown=ps.slice(0,S.pageSize);const body=S.productView==='deck'?v25Deck(shown):`<div class="v25-product-grid mode-${S.productView}">${shown.map(p=>v25ProductCard(p,S.productView)).join('')}</div>`;
-  document.getElementById('page-products').innerHTML=`<div class="v25-product-toolbar"><div class="v25-row v25-row-main"><div class="tabs"><button class="${S.productFilter==='all'?'active':''}" onclick="S.productFilter='all';renderProducts()">전체</button><button class="${S.productFilter==='active'?'active':''}" onclick="S.productFilter='active';renderProducts()">판매제품</button><button class="${S.productFilter==='discontinued'?'active':''}" onclick="S.productFilter='discontinued';renderProducts()">단종제품</button><button class="${S.productSelectionFilter==='selected'?'active':''}" onclick="S.productSelectionFilter=S.productSelectionFilter==='selected'?'all':'selected';renderProducts()">선택${S.selectedProducts.size?` (${S.selectedProducts.size})`:''}</button></div><label>정렬 <select onchange="S.productSort=this.value;renderProducts()"><option value="registered" ${S.productSort==='registered'?'selected':''}>등록순</option><option value="name" ${S.productSort==='name'?'selected':''}>이름순</option><option value="groupname" ${S.productSort==='groupname'?'selected':''}>그룹 + 이름순</option></select></label></div><div class="v25-row v25-row-actions"><button class="secondary" onclick="selectAllVisibleProducts(true);renderProducts()">전체선택</button><button class="secondary" onclick="S.selectedProducts.clear();S.productSelectionFilter='all';renderProducts()">선택해제</button><button class="secondary" onclick="moveSelectedProducts(-1)">↑ 위로</button><button class="secondary" onclick="moveSelectedProducts(1)">↓ 아래로</button><button class="danger" onclick="deleteSelectedProducts()">선택삭제</button></div><div class="v25-row v25-row-view"><label>보기 <select id="v25ViewSelect" onchange="S.productView=this.value;renderProducts()"><option value="large" ${S.productView==='large'?'selected':''}>큰 아이콘</option><option value="medium" ${S.productView==='medium'?'selected':''}>보통 아이콘</option><option value="small" ${S.productView==='small'?'selected':''}>작은 아이콘</option><option value="deck" ${S.productView==='deck'?'selected':''}>목록 (Deck)</option></select></label><label>표시수 <select onchange="S.pageSize=+this.value;renderProducts()">${[10,20,50,100].map(n=>`<option value="${n}" ${S.pageSize===n?'selected':''}>${n}</option>`).join('')}</select></label><span class="v25-count">${shown.length} / ${ps.length}</span><span class="spacer"></span><button class="primary" onclick="triggerExcel()">Excel + 이미지 대량등록</button></div></div>${body}${productHistoryHtmlV10()}`;
+  ensureV18Data();
+  if(!['detail','name','image','deck'].includes(S.productView))S.productView='name';
+  let ps=v18SelectionFiltered(sortedProducts()),shown=ps.slice(0,S.pageSize);
+  const body=S.productView==='deck'?v20Deck(shown):`<div class="product-grid folder-grid product-view-${S.productView}-v20">${shown.map(p=>v20Card(p,S.productView)).join('')}</div>`;
+  document.getElementById('page-products').innerHTML=`<div class="fixed-controls-v18">
+    <div class="control-row-v18 primary-row-v18">
+      <div class="tabs compact-tabs-v18"><button class="${S.productFilter==='all'?'active':''}" onclick="S.productFilter='all';renderProducts()">전체</button><button class="${S.productFilter==='active'?'active':''}" onclick="S.productFilter='active';renderProducts()">판매제품</button><button class="${S.productFilter==='discontinued'?'active':''}" onclick="S.productFilter='discontinued';renderProducts()">단종제품</button><button class="${S.productSelectionFilter==='selected'?'active':''}" onclick="S.productSelectionFilter=S.productSelectionFilter==='selected'?'all':'selected';renderProducts()">선택 ${S.selectedProducts.size?`(${S.selectedProducts.size})`:''}</button></div>
+      <label class="control-select-v18">정렬 <select onchange="S.productSort=this.value;renderProducts()"><option value="registered" ${S.productSort==='registered'?'selected':''}>등록순</option><option value="name" ${S.productSort==='name'?'selected':''}>이름순</option><option value="groupname" ${S.productSort==='groupname'?'selected':''}>그룹 + 이름순</option></select></label><span class="control-count-v18">${shown.length} / ${ps.length}개</span>
+    </div>
+    <div class="control-row-v18 action-row-v18"><button class="secondary" onclick="selectAllVisibleProducts(true);renderProducts()">전체선택</button><button class="secondary" onclick="S.selectedProducts.clear();S.productSelectionFilter='all';renderProducts()">선택해제</button><button class="secondary" onclick="moveSelectedProducts(-1)">↑ 위로</button><button class="secondary" onclick="moveSelectedProducts(1)">↓ 아래로</button><button class="danger" onclick="deleteSelectedProducts()">선택삭제</button></div>
+    <div class="control-row-v18 view-row-v18"><div class="view-select-v19"><select onchange="S.productView=this.value;renderProducts()"><option value="detail" ${S.productView==='detail'?'selected':''}>큰 아이콘</option><option value="name" ${S.productView==='name'?'selected':''}>보통 아이콘</option><option value="image" ${S.productView==='image'?'selected':''}>작은 아이콘</option><option value="deck" ${S.productView==='deck'?'selected':''}>목록 (Deck)</option></select></div><label class="page-size-v18">표시수 <select onchange="S.pageSize=+this.value;renderProducts()">${[10,20,50,100].map(n=>`<option ${S.pageSize===n?'selected':''}>${n}</option>`).join('')}</select></label></div>
+  </div>${body}${productHistoryHtmlV10()}`;
 }
 
-/* v25 bulk import progress/result */
-function v25Time(sec){sec=Math.max(0,Math.round(Number(sec)||0));return sec<60?`${sec}초`:`${Math.floor(sec/60)}분 ${sec%60}초`}
-function v25ImportProgress(done,total,start,label='등록 중'){const el=document.getElementById('v25ImportProgress');if(!el)return;const elapsed=Math.max(.001,(performance.now()-start)/1000),pct=total?Math.round(done/total*100):0,rate=done/elapsed,remain=rate>0?(total-done)/rate:0;el.classList.remove('hidden');el.innerHTML=`<div class="v25-import-head"><b>${label}</b><strong>${done} / ${total} · ${pct}%</strong></div><div class="v25-progress"><i style="width:${pct}%"></i></div><div class="v25-import-stats"><span>경과 ${v25Time(elapsed)}</span><span>${rate.toFixed(rate<10?1:0)}개/초</span><span>예상 남은시간 ${done>=total?'0초':v25Time(remain)}</span></div>`}
-openBulkImport=function(){document.getElementById('modalBody').innerHTML=`<h2>Excel + 이미지 대량등록</h2><div class="card"><p>Excel과 이미지 파일을 선택하면 제품을 등록하고, 진행률과 누락 결과를 마지막까지 표시합니다.</p><button class="secondary" onclick="downloadProductTemplate()">등록용 Excel 양식 다운로드</button><label>Excel 파일<input id="bulkExcel" type="file" accept=".xlsx,.xls,.csv"></label><label>이미지 파일들<input id="bulkImages" type="file" accept="image/*" multiple></label><div id="v25ImportProgress" class="hidden"></div><div id="v25ImportResult"></div><div class="toolbar" style="margin-top:16px"><button id="v25ImportRun" class="primary" onclick="runBulkImport()">대량등록 실행</button><button class="secondary" onclick="closeModal()">닫기</button></div></div>`;document.getElementById('modal').classList.remove('hidden')}
-runBulkImport=async function(){const xf=document.getElementById('bulkExcel')?.files?.[0];if(!xf)return alert('Excel 파일을 선택하세요.');const imgs=[...(document.getElementById('bulkImages')?.files||[])],map=new Map(imgs.map(f=>[f.name.toLowerCase(),f]));const wb=XLSX.read(await xf.arrayBuffer(),{type:'array'}),rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{defval:''});const total=rows.length,start=performance.now(),run=document.getElementById('v25ImportRun');if(run){run.disabled=true;run.textContent='등록 중…'}let add=0,upd=0,imgLinked=0,skipped=0,failed=0;const missing=[],errors=[];v25ImportProgress(0,total,start,'등록 준비 중');for(let i=0;i<rows.length;i++){const row=rows[i];try{const name=String(row['제품명']||row.name||'').trim();if(!name){skipped++;errors.push(`${i+2}행: 제품명 없음`);v25ImportProgress(i+1,total,start);continue}let p=S.data.products.find(x=>x.name===name);const exists=!!p;if(!p){p={id:uid('p'),name,detail_notes:[],detail_sections:[]};S.data.products.push(p);add++}else upd++;p.group=String(row['그룹']??p.group??'');p.w=Number(row['W']??p.w??0)||0;p.d=Number(row['D']??p.d??0)||0;p.h=Number(row['H']??p.h??0)||0;p.weight_g=Number(row['무게(g)']??row['무게']??p.weight_g??0)||0;p.material=String(row['수종']??row['소재']??p.material??'');p.finish=String(row['마감']??p.finish??'');p.cost=Number(row['단가']??row['원가']??p.cost??0)||0;p.branch_price=Number(row['지점가']??p.branch_price??0)||0;p.wholesale_price=Number(row['1차도매가']??row['도매가']??p.wholesale_price??0)||0;p.sale_price=Number(row['판매가']??p.sale_price??0)||0;p.cbm=Number(row['CBM']??p.cbm??0)||((p.w||0)*(p.d||0)*(p.h||0)/1e9);const fn=String(row['대표이미지']||row['이미지']||'').trim();if(fn){const f=map.get(fn.toLowerCase());if(f){p.image=await fileToDataURL(f);imgLinked++}else missing.push(`${name} · ${fn}`)}if(!S.data.inventory.some(x=>x.product_id===p.id))S.data.inventory.push({product_id:p.id,updated_at:now()});}catch(e){failed++;errors.push(`${i+2}행: ${String(e?.message||e)}`)}v25ImportProgress(i+1,total,start);await new Promise(r=>setTimeout(r,0))}v25ImportProgress(total,total,start,'서버 저장 및 동기화 확인 중');const ok=await persist('Excel + 이미지 대량등록');v25ImportProgress(total,total,start,ok?'등록 및 동기화 완료':'등록 완료 · 동기화 확인 필요');render();const result=document.getElementById('v25ImportResult');if(result)result.innerHTML=`<div class="v25-import-result ${ok?'ok':'warn'}"><h3>${ok?'✓ 대량등록 완료':'⚠ 등록 완료 · 동기화 확인 필요'}</h3><div class="v25-result-grid"><span>Excel 행 <b>${total}</b></span><span>신규 <b>${add}</b></span><span>업데이트 <b>${upd}</b></span><span>이미지 연결 <b>${imgLinked}</b></span><span>이미지 누락 <b>${missing.length}</b></span><span>건너뜀/실패 <b>${skipped+failed}</b></span></div>${missing.length?`<details><summary>이미지 누락 보기 (${missing.length})</summary>${missing.map(x=>`<div>${escapeHtml(x)}</div>`).join('')}</details>`:''}${errors.length?`<details><summary>오류/건너뜀 보기 (${errors.length})</summary>${errors.map(x=>`<div>${escapeHtml(x)}</div>`).join('')}</details>`:''}</div>`;if(run){run.disabled=false;run.textContent='다시 대량등록'}}
 
-/* ensure v25 sync status survives render/login updates */
-document.addEventListener('DOMContentLoaded',()=>{v25EnsureState();setTimeout(()=>{v25SyncLabel('공용 데이터 연결 중…','syncing')},20)});
-/* ===== /v25 CLEAN UI ===== */
-
+/* ===== v26 SAFE persistence/sync reset =====
+   Rules:
+   1) Supabase app_state(id='main', data) is the shared source of truth.
+   2) Never replace meaningful local data with an empty/invalid server payload.
+   3) Never seed an empty server with blank/default data.
+   4) Every edit is cached locally first, then POSTed, then verification-read.
+   5) No endless spinner: status is plain text only.
+*/
+S.v26={busy:false,ready:false,dirty:false,pending:0,lastRemote:'',timer:null,lastOk:0};
+function v26Meaningful(d){
+  if(!d||typeof d!=='object')return false;
+  return ['products','inventory','customers','invoices','stock_logs','return_history'].some(k=>Array.isArray(d[k])&&d[k].length>0);
+}
+function v26Valid(d){return d&&typeof d==='object'&&Array.isArray(d.products)&&Array.isArray(d.inventory)&&Array.isArray(d.customers)&&Array.isArray(d.invoices)}
+function v26Status(text,state=''){
+  const el=document.getElementById('syncState');
+  if(el){el.textContent=text;el.dataset.state=state;el.classList.remove('is-syncing','spinning','loading')}
+}
+function v26LocalSave(){try{saveLocal()}catch(e){console.error('local save',e)}}
+async function v26Read(){return await v14RestRead()}
+async function v26WriteAndVerify(){
+  const saved=await v14RestWrite();
+  const row=await v26Read();
+  if(!row?.data||!v26Valid(row.data))throw new Error('서버 저장 확인 실패');
+  return row;
+}
+async function v26SyncNow(){
+  if(S.v26.busy||!navigator.onLine)return false;
+  if(!v14ValidConfig()){v26Status('공용 데이터 연결 설정 필요','error');return false}
+  S.v26.busy=true;v26Status('저장 중','syncing');
+  try{
+    const row=await v26WriteAndVerify();
+    S.remoteUpdatedAtV14=row.updated_at||'';S.v26.lastRemote=S.remoteUpdatedAtV14;
+    S.v26.dirty=false;S.localDirtyV14=false;S.v26.pending=0;S.pendingSyncV14=0;S.v26.lastOk=Date.now();
+    v26LocalSave();v26Status('저장 완료 · 공용 데이터','ok');return true;
+  }catch(e){console.error('V26_SYNC',e);S.v26.dirty=true;S.localDirtyV14=true;v26Status('저장 실패 · 기기에 임시 보관','error');return false}
+  finally{S.v26.busy=false}
+}
+async function v26Refresh(){
+  if(S.v26.busy||S.v26.dirty||!navigator.onLine||!S.v26.ready)return;
+  S.v26.busy=true;
+  try{
+    const row=await v26Read();
+    if(row?.data&&v26Valid(row.data)&&v26Meaningful(row.data)){
+      if(!S.v26.lastRemote||row.updated_at!==S.v26.lastRemote){
+        S.data=row.data;normalizeData();ensureV13Data?.();ensureV14Auth();pruneHistory?.();
+        S.remoteUpdatedAtV14=row.updated_at||'';S.v26.lastRemote=S.remoteUpdatedAtV14;v26LocalSave();
+        try{render();applyRoleUI?.()}catch(e){console.error(e)}
+      }
+      v26Status('동기화 완료 · 공용 데이터','ok');
+    } else if(v26Meaningful(S.data)) {
+      // Preserve local work. An empty server must never erase it.
+      v26Status('서버 데이터 없음 · 현재 데이터 보존','warn');
+    } else {
+      v26Status('연결됨 · 등록 데이터 없음','ok');
+    }
+  }catch(e){console.error('V26_REFRESH',e);v26Status('연결 확인 실패 · 현재 데이터 보존','error')}
+  finally{S.v26.busy=false}
+}
+async function v26ConnectCloud(){
+  clearInterval(S.cloudPollV14);clearInterval(S.v26.timer);
+  if(!v14ValidConfig()){S.cloudReadyV14=false;S.v26.ready=false;v26Status('Supabase 연결 설정 필요','error');return}
+  v26Status('연결 확인','');
+  try{
+    const row=await v26Read();
+    S.cloudReadyV14=true;S.cloud=true;S.v26.ready=true;
+    const remoteGood=row?.data&&v26Valid(row.data)&&v26Meaningful(row.data);
+    const localGood=v26Meaningful(S.data);
+    if(remoteGood){
+      S.data=row.data;normalizeData();ensureV13Data?.();ensureV14Auth();pruneHistory?.();
+      S.remoteUpdatedAtV14=row.updated_at||'';S.v26.lastRemote=S.remoteUpdatedAtV14;v26LocalSave();
+      try{render();applyRoleUI?.()}catch(e){console.error(e)}
+      v26Status('동기화 완료 · 공용 데이터','ok');
+    } else if(localGood){
+      // Recovery/migration: keep local data and persist it once to an empty server.
+      S.v26.dirty=true;S.localDirtyV14=true;await v26SyncNow();
+    } else {
+      v26Status('연결됨 · 등록 데이터 없음','ok');
+    }
+    S.v26.timer=setInterval(()=>{if(S.v26.dirty)v26SyncNow();else v26Refresh()},1800);
+  }catch(e){console.error('V26_CONNECT',e);S.cloudReadyV14=false;S.v26.ready=false;v26Status('연결 실패 · 기기 데이터 유지','error')}
+}
+// Final persistence override used by ALL product/inventory/customer/invoice edits.
+persist=async function(){
+  ensureV13Data?.();ensureV14Auth();pruneHistory?.();
+  v26LocalSave();S.v26.dirty=true;S.localDirtyV14=true;S.v26.pending++;S.pendingSyncV14=S.v26.pending;
+  if(S.v26.ready)await v26SyncNow(); else v26Status('기기에 저장됨 · 서버 연결 대기','warn');
+}
+// Old listeners call these names, so redirect them to the safe engine.
+v14ConnectCloud=v26ConnectCloud;v14SyncNow=v26SyncNow;v14Refresh=v26Refresh;
+window.addEventListener('online',()=>{if(S.v26.ready){if(S.v26.dirty)v26SyncNow();else v26Refresh()}else v26ConnectCloud()});
+window.addEventListener('offline',()=>v26Status('오프라인 · 기기에 저장됨','warn'));
+document.addEventListener('visibilitychange',()=>{if(!document.hidden){if(S.v26.dirty)v26SyncNow();else v26Refresh()}});
+// Direct start too: this avoids iframe/DOMContentLoaded timing problems.
+setTimeout(v26ConnectCloud,60);
