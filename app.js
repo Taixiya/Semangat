@@ -1561,3 +1561,246 @@ customerReportDataV12=function(){
 
 const _v17RenderBase=render;
 render=function(){ensureV17Data();return _v17RenderBase();}
+
+
+/* ===== v18 fixed toolbars + folder views + photo outbound OCR ===== */
+function ensureV18Data(){
+  ensureV17Data();
+  if(!Array.isArray(S.data.photo_out_history))S.data.photo_out_history=[];
+  if(!S.productSelectionFilter)S.productSelectionFilter='all';
+  if(!['detail','name','image','deck'].includes(S.productView))S.productView='detail';
+}
+function v18SelectionFiltered(ps){return S.productSelectionFilter==='selected'?ps.filter(p=>S.selectedProducts.has(p.id)):ps}
+function v18ProductSize(p){const a=[p.w||p.W,p.d||p.D,p.h||p.H].map(v=>String(v??'').trim());return a.some(Boolean)?a.map(v=>v||'-').join(' × '):''}
+function v18ViewButton(mode,label,kind){return `<button class="view-folder-btn-v18 ${S.productView===mode?'active':''}" onclick="S.productView='${mode}';renderProducts()"><span class="view-folder-icon-v18 ${kind}"><i></i><i></i><i></i></span><span>${label}</span></button>`}
+function v18ProductCard(p,mode){
+  const selected=S.selectedProducts.has(p.id)?' selected-product-v18':'';
+  if(mode==='image')return `<div class="product-card folder-card image-only-card-v18 ${p.discontinued?'discontinued-card':''}${selected}" onclick="openProduct('${p.id}')"><div class="card-select">${productSelectBox(p.id)}</div><div class="folder-image">${imgTag(p)}</div></div>`;
+  if(mode==='name')return `<div class="product-card folder-card name-card-v18 ${p.discontinued?'discontinued-card':''}${selected}" onclick="openProduct('${p.id}')"><div class="card-select">${productSelectBox(p.id)}</div><div class="folder-image">${imgTag(p)}</div><div class="body"><b>${productNameHtml(p)}</b></div></div>`;
+  const sz=v18ProductSize(p);return `<div class="product-card folder-card detail-card-v18 ${p.discontinued?'discontinued-card':''}${selected}" onclick="openProduct('${p.id}')"><div class="card-select">${productSelectBox(p.id)}</div><div class="folder-image">${imgTag(p)}</div><div class="body"><b>${productNameHtml(p)}</b><div class="muted">${escapeHtml(p.material||'')}${p.group?' · '+escapeHtml(p.group):''}</div>${sz?`<div class="muted product-size-v18">${escapeHtml(sz)}</div>`:''}<div class="folder-stock">총수량 <b>${totalQty(p.id)}</b></div></div></div>`}
+renderProducts=function(){
+  ensureV18Data();let ps=v18SelectionFiltered(sortedProducts()),shown=ps.slice(0,S.pageSize);const body=`<div class="product-grid folder-grid product-view-${S.productView}-v18">${shown.map(p=>v18ProductCard(p,S.productView)).join('')}</div>`;
+  document.getElementById('page-products').innerHTML=`<div class="fixed-controls-v18">
+    <div class="control-row-v18 primary-row-v18">
+      <div class="tabs compact-tabs-v18"><button class="${S.productFilter==='all'?'active':''}" onclick="S.productFilter='all';renderProducts()">전체</button><button class="${S.productFilter==='active'?'active':''}" onclick="S.productFilter='active';renderProducts()">판매제품</button><button class="${S.productFilter==='discontinued'?'active':''}" onclick="S.productFilter='discontinued';renderProducts()">단종제품</button><button class="${S.productSelectionFilter==='selected'?'active':''}" onclick="S.productSelectionFilter=S.productSelectionFilter==='selected'?'all':'selected';renderProducts()">선택 ${S.selectedProducts.size?`(${S.selectedProducts.size})`:''}</button></div>
+      <label class="control-select-v18">정렬 <select onchange="S.productSort=this.value;renderProducts()"><option value="registered" ${S.productSort==='registered'?'selected':''}>등록순</option><option value="name" ${S.productSort==='name'?'selected':''}>이름순</option><option value="groupname" ${S.productSort==='groupname'?'selected':''}>그룹 + 이름순</option></select></label>
+      <span class="control-count-v18">표시 ${shown.length} / ${ps.length}</span>
+    </div>
+    <div class="control-row-v18 action-row-v18"><button class="secondary" onclick="selectAllVisibleProducts(true);renderProducts()">전체선택</button><button class="secondary" onclick="S.selectedProducts.clear();S.productSelectionFilter='all';renderProducts()">선택해제</button><button class="secondary" onclick="moveSelectedProducts(-1)">↑ 위로</button><button class="secondary" onclick="moveSelectedProducts(1)">↓ 아래로</button><button class="danger" onclick="deleteSelectedProducts()">선택삭제</button></div>
+    <div class="control-row-v18 view-row-v18"><div class="view-folder-group-v18">${v18ViewButton('detail','이미지 + 상세','detail')}${v18ViewButton('name','이미지 + 이름','name')}${v18ViewButton('image','이미지만','image')}</div><label class="page-size-v18">표시수 <select onchange="S.pageSize=+this.value;renderProducts()">${[10,20,50,100].map(n=>`<option ${S.pageSize===n?'selected':''}>${n}</option>`).join('')}</select></label></div>
+  </div>${body}${productHistoryHtmlV10()}`;
+}
+renderInventory=function(){
+  ensureV18Data();const locs=S.data.locations;let ps=v18SelectionFiltered(sortedProducts());
+  document.getElementById('page-inventory').innerHTML=`<div class="fixed-controls-v18 inventory-controls-v18">
+    <div class="control-row-v18 primary-row-v18"><button class="primary" onclick="stockMove()">+ 입고 / 출고 / 이동</button><button class="secondary" onclick="manageLocations()">위치 관리</button><div class="tabs compact-tabs-v18"><button class="${S.productFilter==='all'?'active':''}" onclick="S.productFilter='all';renderInventory()">전체</button><button class="${S.productFilter==='active'?'active':''}" onclick="S.productFilter='active';renderInventory()">판매제품</button><button class="${S.productFilter==='discontinued'?'active':''}" onclick="S.productFilter='discontinued';renderInventory()">단종제품</button><button class="${S.productSelectionFilter==='selected'?'active':''}" onclick="S.productSelectionFilter=S.productSelectionFilter==='selected'?'all':'selected';renderInventory()">선택 ${S.selectedProducts.size?`(${S.selectedProducts.size})`:''}</button></div><label class="control-select-v18">정렬 <select onchange="S.productSort=this.value;renderInventory()"><option value="registered" ${S.productSort==='registered'?'selected':''}>등록순</option><option value="name" ${S.productSort==='name'?'selected':''}>이름순</option><option value="groupname" ${S.productSort==='groupname'?'selected':''}>그룹 + 이름순</option></select></label></div>
+    <div class="control-row-v18 action-row-v18"><button class="secondary" onclick="selectAllInventoryProducts(true);renderInventory()">전체선택</button><button class="secondary" onclick="S.selectedProducts.clear();S.productSelectionFilter='all';renderInventory()">선택해제</button><button class="secondary" onclick="moveSelectedProducts(-1)">↑ 위로</button><button class="secondary" onclick="moveSelectedProducts(1)">↓ 아래로</button><button class="danger" onclick="deleteSelectedProducts()">선택삭제</button></div>
+  </div><div class="table-wrap"><table><thead><tr><th class="select-col">선택</th><th>이미지</th><th>제품명</th>${locs.map(l=>`<th>${escapeHtml(l.name)}</th>`).join('')}<th>총수량</th><th>변경날짜</th><th>수정</th></tr></thead><tbody>${ps.map(p=>{let inv=invFor(p.id),editing=S.inventoryEditSet.has(p.id);return `<tr><td class="select-col">${productSelectBox(p.id)}</td><td class="image-cell">${p.image?`<img class="inv-img" src="${p.image}">`:`<div class="img-placeholder inv-img">NO</div>`}</td><td>${productNameHtml(p)}</td>${locs.map(l=>`<td><input type="number" value="${inv[l.id]||0}" ${editing?'':'disabled'} onchange="updateStock('${p.id}','${l.id}',this.value)"></td>`).join('')}<td><b>${totalQty(p.id)}</b></td><td>${inv.updated_at||''}</td><td><button class="${editing?'primary':'secondary'}" onclick="toggleInventoryEdit('${p.id}')">${editing?'완료':'Edit'}</button></td></tr>`}).join('')}</tbody></table></div>
+  <div class="card history-card" style="margin-top:16px"><div class="toolbar"><h3 style="margin:0">재고 이력</h3><span class="muted">최근 10건 표시</span><span class="spacer"></span><button class="secondary" onclick="openStockHistory()">전체 이력 보기</button></div>${S.data.stock_logs.slice(-10).reverse().map(x=>`<div class="search-result">${x.at||''} · ${escapeHtml(x.product||'')} · ${escapeHtml(x.note||'')}${x.user?' · '+escapeHtml(x.user):''}</div>`).join('')||'<span class="muted">아직 이력이 없습니다.</span>'}</div>`;
+}
+
+function photoNormalizeV18(s){return String(s||'').toLowerCase().replace(/[\s\-_.·/\\()\[\]{}]/g,'').replace(/[^0-9a-z가-힣]/g,'')}
+function photoLevenshteinV18(a,b){a=photoNormalizeV18(a);b=photoNormalizeV18(b);if(!a||!b)return Math.max(a.length,b.length);const d=Array(b.length+1).fill(0).map((_,i)=>i);for(let i=1;i<=a.length;i++){let prev=d[0];d[0]=i;for(let j=1;j<=b.length;j++){const old=d[j],cost=a[i-1]===b[j-1]?0:1;d[j]=Math.min(d[j]+1,d[j-1]+1,prev+cost);prev=old}}return d[b.length]}
+function photoScoreV18(q,name){const a=photoNormalizeV18(q),b=photoNormalizeV18(name);if(!a||!b)return 0;if(a===b)return 1;if(a.includes(b)||b.includes(a))return .88+Math.min(a.length,b.length)/Math.max(a.length,b.length)*.1;return Math.max(0,1-photoLevenshteinV18(a,b)/Math.max(a.length,b.length))}
+function photoBestMatchesV18(q){return S.data.products.map(p=>({p,score:photoScoreV18(q,p.name)})).sort((a,b)=>b.score-a.score).slice(0,5)}
+function photoPickLocationV18(pid,qty){const iv=invFor(pid),locs=S.data.locations.map(l=>({l,qty:Number(iv[l.id]||0)})).sort((a,b)=>b.qty-a.qty);return (locs.find(x=>x.qty>=qty)||locs[0]||{}).l?.id||''}
+function photoParseLineV18(line){let raw=String(line||'').trim();if(!raw)return null;raw=raw.replace(/[|]/g,' ').replace(/\s+/g,' ');let qty=0,query=raw;let m=raw.match(/(?:수량|qty|q'ty|x|×|\*)\s*[:=]?\s*(\d+)\s*(?:개|ea)?\s*$/i)||raw.match(/(\d+)\s*(?:개|ea)\s*$/i)||raw.match(/[\s,:-](\d+)\s*$/);if(m){qty=Number(m[1]||0);query=raw.slice(0,m.index).trim().replace(/[\-:]+$/,'').trim()}if(!qty)qty=1;const best=photoBestMatchesV18(query)[0];const pid=best&&best.score>=.28?best.p.id:'';return {raw,query,qty,product_id:pid,score:best?.score||0,location_id:pid?photoPickLocationV18(pid,qty):''}}
+function photoParseTextV18(text){const rows=String(text||'').split(/\r?\n/).map(photoParseLineV18).filter(Boolean);window._photoOutV18.rows=rows;drawPhotoOutboundRowsV18()}
+function openPhotoOutboundV18(){
+  ensureV18Data();window._photoOutV18={rows:[],text:'',files:[],busy:false};document.getElementById('modalBody').innerHTML=`<div class="modal-sticky-head photo-head-v18"><div><h2>사진 출고 정리</h2><div class="muted">사진의 제품명과 수량을 읽어 제품을 자동 매칭합니다. 마지막 확인 전에는 재고가 바뀌지 않습니다.</div></div><button class="primary" id="photoApplyBtnV18" onclick="applyPhotoOutboundV18()" disabled>확인 후 재고 반영</button></div>
+  <div class="photo-work-v18"><div class="photo-upload-v18"><label class="photo-drop-v18"><b>① 출고 메모 사진 선택</b><span>휴대폰 촬영 사진 또는 갤러리 이미지 · 여러 장 가능</span><input id="photoFilesV18" type="file" accept="image/*" multiple onchange="photoFilesChangedV18(this.files)"></label><div id="photoPreviewV18" class="photo-preview-v18"></div><div id="photoProgressV18" class="photo-progress-v18">사진을 선택하세요.</div></div>
+  <div class="photo-text-v18"><div class="photo-section-title-v18"><b>② 인식된 글자</b><button class="secondary" onclick="photoParseTextV18(document.getElementById('photoOcrTextV18').value)">수정한 글자로 다시 정리</button></div><textarea id="photoOcrTextV18" placeholder="예: 곰맥주박스 3개\n원형트레이 2개"></textarea><div class="muted">글씨가 잘못 읽힌 부분은 여기서 직접 고친 뒤 ‘수정한 글자로 다시 정리’를 누르면 됩니다.</div></div>
+  <div><div class="photo-section-title-v18"><b>③ 제품·수량 확인</b><button class="secondary" onclick="addPhotoOutboundRowV18()">+ 항목 추가</button></div><div id="photoRowsV18"></div></div></div>`;document.getElementById('modal').classList.remove('hidden');
+}
+function photoFilesChangedV18(files){window._photoOutV18.files=[...(files||[])];const prev=document.getElementById('photoPreviewV18');prev.innerHTML='';window._photoOutV18.files.forEach(f=>{const img=document.createElement('img');img.src=URL.createObjectURL(f);img.onload=()=>URL.revokeObjectURL(img.src);prev.appendChild(img)});runPhotoOcrV18()}
+async function runPhotoOcrV18(){
+  const st=window._photoOutV18,prog=document.getElementById('photoProgressV18');if(!st?.files?.length)return;if(!window.Tesseract){prog.innerHTML='<b>문자인식 모듈을 불러오지 못했습니다.</b><br>아래 글자칸에 직접 입력해서 사용할 수 있습니다.';return}st.busy=true;let all=[];
+  for(let i=0;i<st.files.length;i++){const f=st.files[i];prog.innerHTML=`<b>사진 ${i+1}/${st.files.length} 분석 중...</b><div class="ocr-bar-v18"><i style="width:2%"></i></div><span>처음 사용 시 한국어 인식 모듈을 받느라 시간이 조금 걸릴 수 있습니다.</span>`;try{const r=await Tesseract.recognize(f,'kor+eng',{logger:m=>{if(m.status==='recognizing text'){const pct=Math.round((m.progress||0)*100);const bar=prog.querySelector('i');if(bar)bar.style.width=pct+'%';const sp=prog.querySelector('span');if(sp)sp.textContent=`글자 인식 ${pct}%`}}});all.push(r.data?.text||'')}catch(e){all.push('');console.error(e)}}
+  st.text=all.filter(Boolean).join('\n');document.getElementById('photoOcrTextV18').value=st.text;photoParseTextV18(st.text);prog.innerHTML=`<b>분석 완료</b> · ${st.rows.length}개 줄 정리됨 <span class="muted">제품명/수량을 확인하고 필요하면 수정하세요.</span>`;st.busy=false;
+}
+function addPhotoOutboundRowV18(){window._photoOutV18.rows.push({raw:'직접 추가',query:'',qty:1,product_id:'',score:0,location_id:''});drawPhotoOutboundRowsV18()}
+function removePhotoOutboundRowV18(i){window._photoOutV18.rows.splice(i,1);drawPhotoOutboundRowsV18()}
+function setPhotoProductV18(i,pid){const r=window._photoOutV18.rows[i];r.product_id=pid;r.score=pid?1:0;r.location_id=pid?photoPickLocationV18(pid,r.qty):'';drawPhotoOutboundRowsV18()}
+function setPhotoQtyV18(i,v){const r=window._photoOutV18.rows[i];r.qty=Math.max(0,Number(v)||0);if(r.product_id&&!r.location_id)r.location_id=photoPickLocationV18(r.product_id,r.qty);drawPhotoOutboundRowsV18()}
+function setPhotoLocV18(i,lid){window._photoOutV18.rows[i].location_id=lid;drawPhotoOutboundRowsV18()}
+function photoProductOptionsV18(sel){return `<option value="">제품 선택 필요</option>${[...S.data.products].sort((a,b)=>(a.name||'').localeCompare(b.name||'','ko')).map(p=>`<option value="${p.id}" ${p.id===sel?'selected':''}>${escapeHtml(p.name)}</option>`).join('')}`}
+function drawPhotoOutboundRowsV18(){
+  const box=document.getElementById('photoRowsV18');if(!box)return;const rows=window._photoOutV18.rows||[];box.innerHTML=rows.length?`<div class="photo-table-v18"><div class="photo-tr-v18 photo-th-v18"><span>사진에서 읽은 내용</span><span>제품 선택</span><span>출고수량</span><span>차감 위치</span><span>현재 → 최종</span><span></span></div>${rows.map((r,i)=>{const p=S.data.products.find(x=>x.id===r.product_id),iv=p?invFor(p.id):{},cur=r.location_id?Number(iv[r.location_id]||0):0,after=cur-Number(r.qty||0),amb=!p||r.score<.55;const matches=photoBestMatchesV18(r.query||r.raw);return `<div class="photo-tr-v18 ${amb?'needs-check-v18':''}"><span><b>${escapeHtml(r.raw||'')}</b><small>${amb?'확인 필요':'자동 매칭'}${r.score?` · ${Math.round(r.score*100)}%`:''}</small>${matches.length?`<small class="candidate-v18">후보: ${matches.slice(0,3).map(x=>escapeHtml(x.p.name)).join(' / ')}</small>`:''}</span><span><select onchange="setPhotoProductV18(${i},this.value)">${photoProductOptionsV18(r.product_id)}</select></span><span><input type="number" min="0" value="${r.qty}" onchange="setPhotoQtyV18(${i},this.value)"></span><span><select onchange="setPhotoLocV18(${i},this.value)"><option value="">위치 선택</option>${S.data.locations.map(l=>`<option value="${l.id}" ${l.id===r.location_id?'selected':''}>${escapeHtml(l.name)} (${Number(iv[l.id]||0)})</option>`).join('')}</select></span><span class="stock-after-v18 ${after<0?'bad':''}">${p&&r.location_id?`${cur} → <b>${after}</b>`:'-'}</span><span><button class="danger mini-v18" onclick="removePhotoOutboundRowV18(${i})">삭제</button></span></div>`}).join('')}</div>`:'<div class="card muted">아직 정리된 항목이 없습니다. 사진을 분석하거나 항목을 직접 추가하세요.</div>';
+  const ok=rows.length&&rows.every(r=>{const p=S.data.products.find(x=>x.id===r.product_id),iv=p?invFor(p.id):{};return p&&r.location_id&&Number(r.qty||0)>0&&Number(iv[r.location_id]||0)>=Number(r.qty||0)});const btn=document.getElementById('photoApplyBtnV18');if(btn)btn.disabled=!ok;
+}
+async function applyPhotoOutboundV18(){
+  ensureV18Data();const rows=window._photoOutV18?.rows||[];if(!rows.length)return alert('반영할 제품이 없습니다.');const plans=[];for(const r of rows){const p=S.data.products.find(x=>x.id===r.product_id),l=S.data.locations.find(x=>x.id===r.location_id),q=Number(r.qty||0);if(!p||!l||q<=0)return alert('제품, 수량, 차감 위치를 모두 확인하세요.');const iv=invFor(p.id),cur=Number(iv[l.id]||0);if(cur<q)return alert(`${p.name}: ${l.name} 재고가 부족합니다. 현재 ${cur}개 / 출고 ${q}개`);plans.push({r,p,l,iv,q,cur})}
+  if(!confirm(`사진 출고 ${plans.length}개 항목을 실제 재고에서 차감할까요?\n확인 후 즉시 저장됩니다.`))return;const hist={id:uid('phout'),at:now(),user:loginActor(),ocr_text:document.getElementById('photoOcrTextV18')?.value||'',items:[]};for(const x of plans){x.iv[x.l.id]=x.cur-x.q;x.iv.updated_at=now();S.data.stock_logs.push({at:now(),product:x.p.name,note:`사진 출고 정리 · ${x.l.name} -${x.q} · ${x.cur}→${x.cur-x.q}`,user:loginActor()});hist.items.push({product_id:x.p.id,product:x.p.name,location_id:x.l.id,location:x.l.name,qty:x.q,before:x.cur,after:x.cur-x.q});addChangeLog('사진 출고 정리',`${x.p.name} · ${x.l.name} -${x.q} · ${x.cur}→${x.cur-x.q}`,x.p.id)}S.data.photo_out_history.push(hist);if(S.data.photo_out_history.length>200)S.data.photo_out_history=S.data.photo_out_history.slice(-200);await persist();closeModal();render();alert(`사진 출고 정리 완료\n${plans.length}개 항목의 재고를 반영했습니다.`)
+}
+
+const _v18AllocationBase=renderAllocationV15;
+renderAllocationV15=function(){
+  _v18AllocationBase();const page=document.getElementById('page-allocation');if(!page)return;let bar=page.querySelector('.photo-out-action-v18');if(!bar){bar=document.createElement('div');bar.className='photo-out-action-v18';bar.innerHTML=`<div><b>사진으로 출고 정리</b><span>제품명과 수량을 적은 메모 사진을 읽어 자동 매칭 → 수정 → 최종 확인 후 재고 차감</span></div><button class="primary" onclick="openPhotoOutboundV18()">📷 사진 출고 정리</button>`;page.prepend(bar)}
+}
+
+const _v18RenderBase=render;
+render=function(){ensureV18Data();_v18RenderBase();if(S.page==='products')renderProducts();if(S.page==='inventory')renderInventory();if(S.page==='allocation'){renderAllocationV15();setPageMeta('출고 정리','거래 출고·반품 또는 사진 메모로 재고를 정리합니다.')}}
+
+
+/* ===== v19 bulk import progress/result + compact product view selector ===== */
+function v19FmtTime(sec){sec=Math.max(0,Math.round(Number(sec)||0));if(sec<60)return `${sec}초`;const m=Math.floor(sec/60),s=sec%60;return `${m}분 ${s}초`}
+function v19SetImportProgress(done,total,start,label='등록 중'){
+  const box=document.getElementById('bulkProgressV19');if(!box)return;const elapsed=Math.max(.1,(Date.now()-start)/1000),rate=done/elapsed,pct=total?Math.round(done/total*100):0,remain=rate>0?(total-done)/rate:0;
+  box.classList.remove('hidden');box.innerHTML=`<div class="bulk-progress-head-v19"><b>${label}</b><strong>${done} / ${total} · ${pct}%</strong></div><div class="bulk-progress-bar-v19"><i style="width:${pct}%"></i></div><div class="bulk-progress-stats-v19"><span>경과 ${v19FmtTime(elapsed)}</span><span>${rate.toFixed(rate<10?1:0)}개/초</span><span>예상 남은시간 ${done>=total?'0초':v19FmtTime(remain)}</span></div>`;
+}
+triggerExcel=function(){
+  document.getElementById('modalBody').innerHTML=`<h2>Excel + 이미지 대량등록</h2><div class="card bulk-import-card"><p><b>1.</b> Excel 파일을 선택하고 <b>2.</b> Excel에 적은 이미지 파일들을 한 번에 선택하세요.</p><p class="muted">대표이미지는 Excel의 <b>대표이미지</b> 열 파일명과 자동 연결됩니다. 파일명이 맞지 않으면 완료 결과에서 누락 제품을 확인할 수 있습니다.</p><div class="toolbar"><button class="secondary" onclick="downloadProductTemplate()">등록용 Excel 양식 다운로드</button></div><label>Excel 파일<input id="bulkExcel" type="file" accept=".xlsx,.xls,.csv"></label><label>이미지 파일들<input id="bulkImages" type="file" accept="image/*" multiple></label><div class="muted">필요한 대표/상세 이미지를 모두 한 번에 선택하세요.</div><div id="bulkProgressV19" class="bulk-progress-v19 hidden"></div><div id="bulkResultV19"></div><div class="toolbar" style="margin-top:16px"><button id="bulkRunV19" class="primary" onclick="runBulkImport()">대량등록 실행</button><button class="secondary" onclick="closeModal()">닫기</button></div></div>`;document.getElementById('modal').classList.remove('hidden')
+}
+runBulkImport=async function(){
+  const xf=document.getElementById('bulkExcel')?.files?.[0];if(!xf)return alert('Excel 파일을 선택하세요.');
+  const run=document.getElementById('bulkRunV19');if(run){run.disabled=true;run.textContent='등록 진행 중...'}
+  const imgs=[...(document.getElementById('bulkImages')?.files||[])],imageMap=new Map(imgs.map(f=>[f.name.trim().toLowerCase(),f]));
+  const arr=await xf.arrayBuffer(),wb=XLSX.read(arr,{type:'array'}),rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{defval:''}),total=rows.length,start=Date.now();
+  const readImg=f=>new Promise(res=>{const r=new FileReader();r.onload=()=>res(r.result);r.onerror=()=>res('');r.readAsDataURL(f)});
+  let add=0,upd=0,imgLinked=0,skipped=0,failed=0;const missing=[],errors=[];v19SetImportProgress(0,total,start,'등록 준비 중');
+  for(let ri=0;ri<rows.length;ri++){
+    const row=rows[ri];try{
+      const name=String(row['제품명']||row.name||'').trim();if(!name){skipped++;errors.push(`${ri+2}행: 제품명 없음`);v19SetImportProgress(ri+1,total,start);continue}
+      let p=S.data.products.find(x=>x.name===name),isNew=!p;if(!p)p={id:uid('p'),image:'',detail_notes:[],note_height:620,detail_sections:[],detail_ko:'',detail_id:'',detail_en:''};
+      Object.assign(p,{name,group:row['그룹']||row.group||'',material:row['수종']||row['소재']||row.material||'',finish:row['마감']||row.finish||'',weight_g:+(row['무게(g)']||row.weight_g||0),w:+(row.W||row.w||0),d:+(row.D||row.d||0),h:+(row.H||row.h||0),cost:+(row['원가']||row.cost||0),branch_price:+(row['지점가']||row.branch_price||0),wholesale_price:+(row['1차 도매가']||row.wholesale_price||0),sale_price:+(row['판매가']||row.sale_price||0)});p.cbm=+(row.CBM||row.cbm||0)||((p.w*p.d*p.h)/1e9);
+      const mainRaw=String(row['대표이미지']||row['이미지']||row.image||'').trim(),mainName=mainRaw.toLowerCase();if(mainName){if(imageMap.has(mainName)){p.image=await readImg(imageMap.get(mainName));imgLinked++}else missing.push(`${name} — ${mainRaw}`)}
+      const notes=[];let y=20;for(let i=1;i<=20;i++){const txt=String(row['상세텍스트'+i]||'').trim();if(txt){notes.push({type:'text',text:txt,x:360,y,w:300,h:120});y+=140}const raw=String(row['상세이미지'+i]||'').trim(),nm=raw.toLowerCase();if(nm){if(imageMap.has(nm)){const data=await readImg(imageMap.get(nm));notes.push({type:'image',data,x:20,y:Math.max(20,y-140),w:300,h:220});imgLinked++;y+=240}else missing.push(`${name} — ${raw}`)}}
+      if(notes.length){p.detail_notes=notes;p.note_height=Math.max(620,y+40)}if(isNew){S.data.products.push(p);S.data.inventory.push({product_id:p.id,updated_at:now()});add++}else upd++;
+    }catch(e){failed++;errors.push(`${ri+2}행: ${String(e?.message||e)}`)}v19SetImportProgress(ri+1,total,start);await new Promise(r=>setTimeout(r,0));
+  }
+  v19SetImportProgress(total,total,start,'서버 저장 및 동기화 중');let syncOK=true;try{await persist()}catch(e){syncOK=false;errors.push(`서버 저장: ${String(e?.message||e)}`)}render();v19SetImportProgress(total,total,start,syncOK?'등록 및 저장 완료':'등록 완료 · 서버 동기화 확인 필요');
+  const result=document.getElementById('bulkResultV19');if(result)result.innerHTML=`<div class="bulk-result-v19 ${syncOK?'ok':'warn'}"><h3>${syncOK?'✓ 대량등록 완료':'⚠ 등록 완료 · 동기화 확인 필요'}</h3><div class="bulk-result-grid-v19"><span>Excel 행 <b>${total}</b></span><span>신규 <b>${add}</b></span><span>업데이트 <b>${upd}</b></span><span>이미지 연결 <b>${imgLinked}</b></span><span>이미지 누락 <b>${missing.length}</b></span><span>건너뜀/실패 <b>${skipped+failed}</b></span></div>${missing.length?`<details><summary>이미지 누락 항목 보기 (${missing.length})</summary><div class="bulk-issue-list-v19">${missing.map(x=>`<div>${escapeHtml(x)}</div>`).join('')}</div></details>`:''}${errors.length?`<details><summary>건너뜀/오류 항목 보기 (${errors.length})</summary><div class="bulk-issue-list-v19">${errors.map(x=>`<div>${escapeHtml(x)}</div>`).join('')}</div></details>`:''}</div>`;
+  if(run){run.disabled=false;run.textContent='다시 대량등록'}
+}
+function v19ViewSelect(){return `<label class="view-select-v19"><select onchange="S.productView=this.value;renderProducts()"><option value="detail" ${S.productView==='detail'?'selected':''}>큰 아이콘</option><option value="name" ${S.productView==='name'?'selected':''}>보통 아이콘</option><option value="image" ${S.productView==='image'?'selected':''}>작은 아이콘</option><option value="deck" ${S.productView==='deck'?'selected':''}>목록 (Deck)</option></select></label>`}
+const _v19ProductCard=v18ProductCard;
+v18ProductCard=function(p,mode){if(mode==='deck'){const selected=S.selectedProducts.has(p.id)?' selected-product-v18':'';return `<div class="product-deck-row-v19 ${p.discontinued?'discontinued-card':''}${selected}" onclick="openProduct('${p.id}')"><div>${productSelectBox(p.id)}</div><div class="deck-thumb-v19">${imgTag(p)}</div><div><b>${productNameHtml(p)}</b><small>${escapeHtml(p.group||'')} ${p.material?'· '+escapeHtml(p.material):''}</small></div><div>총수량 <b>${totalQty(p.id)}</b></div></div>`}return _v19ProductCard(p,mode)}
+const _renderProductsV19=renderProducts;
+renderProducts=function(){if(!['detail','name','image','deck'].includes(S.productView))S.productView='name';_renderProductsV19();const row=document.querySelector('#page-products .view-row-v18');if(row){const grp=row.querySelector('.view-folder-group-v18');if(grp)grp.outerHTML=v19ViewSelect()}const grid=document.querySelector('#page-products .product-grid');if(grid&&S.productView==='deck')grid.classList.add('deck-list-v19')}
+
+
+/* ===== v20 product view exact layouts ===== */
+function v20IdName(p){return p.name_id||p.name_idn||p.name_indonesia||p.indonesian_name||p.detail_id||''}
+function v20Spec(p){const a=[p.w||p.W,p.d||p.D,p.h||p.H].map(v=>String(v??'').trim());return a.some(Boolean)?a.map(v=>v||'-').join('×'):''}
+function v20Stop(e){e.stopPropagation()}
+function v20EditBtn(p){return `<button class="product-edit-v20" onclick="event.stopPropagation();openProduct('${p.id}')">수정</button>`}
+function v20Card(p,mode){
+  const selected=S.selectedProducts.has(p.id)?' selected-product-v18':'';
+  const name=productNameHtml(p), spec=v20Spec(p), mat=escapeHtml(p.material||''), fin=escapeHtml(p.finish||''), grp=escapeHtml(p.group||'');
+  const info=`<div class="v20-card-name"><b>${name}</b></div><div class="v20-card-line">${grp?grp+' · ':''}${spec||'-'}</div><div class="v20-card-line">${mat||'-'}${fin?' / '+fin:''}</div>`;
+  return `<div class="product-card folder-card product-card-v20 product-card-${mode}-v20 ${p.discontinued?'discontinued-card':''}${selected}" onclick="openProduct('${p.id}')"><div class="card-select" onclick="event.stopPropagation()">${productSelectBox(p.id)}</div><div class="folder-image">${imgTag(p)}</div><div class="body">${info}${v20EditBtn(p)}</div></div>`
+}
+function v20Deck(ps){
+  return `<div class="table-wrap product-deck-table-v20"><table><thead><tr><th class="select-col"></th><th>이미지</th><th>한국명</th><th>인니명</th><th>그룹</th><th>규격</th><th>수종</th><th>마감</th><th></th></tr></thead><tbody>${ps.map(p=>`<tr class="${p.discontinued?'discontinued-card':''}" onclick="openProduct('${p.id}')"><td onclick="event.stopPropagation()">${productSelectBox(p.id)}</td><td class="deck-img-cell-v20">${imgTag(p)}</td><td><b>${productNameHtml(p)}</b></td><td>${escapeHtml(v20IdName(p)||'-')}</td><td>${escapeHtml(p.group||'-')}</td><td>${escapeHtml(v20Spec(p)||'-')}</td><td>${escapeHtml(p.material||'-')}</td><td>${escapeHtml(p.finish||'-')}</td><td>${v20EditBtn(p)}</td></tr>`).join('')}</tbody></table></div>`
+}
+renderProducts=function(){
+  ensureV18Data();
+  if(!['detail','name','image','deck'].includes(S.productView))S.productView='name';
+  let ps=v18SelectionFiltered(sortedProducts()),shown=ps.slice(0,S.pageSize);
+  const body=S.productView==='deck'?v20Deck(shown):`<div class="product-grid folder-grid product-view-${S.productView}-v20">${shown.map(p=>v20Card(p,S.productView)).join('')}</div>`;
+  document.getElementById('page-products').innerHTML=`<div class="fixed-controls-v18">
+    <div class="control-row-v18 primary-row-v18">
+      <div class="tabs compact-tabs-v18"><button class="${S.productFilter==='all'?'active':''}" onclick="S.productFilter='all';renderProducts()">전체</button><button class="${S.productFilter==='active'?'active':''}" onclick="S.productFilter='active';renderProducts()">판매제품</button><button class="${S.productFilter==='discontinued'?'active':''}" onclick="S.productFilter='discontinued';renderProducts()">단종제품</button><button class="${S.productSelectionFilter==='selected'?'active':''}" onclick="S.productSelectionFilter=S.productSelectionFilter==='selected'?'all':'selected';renderProducts()">선택 ${S.selectedProducts.size?`(${S.selectedProducts.size})`:''}</button></div>
+      <label class="control-select-v18">정렬 <select onchange="S.productSort=this.value;renderProducts()"><option value="registered" ${S.productSort==='registered'?'selected':''}>등록순</option><option value="name" ${S.productSort==='name'?'selected':''}>이름순</option><option value="groupname" ${S.productSort==='groupname'?'selected':''}>그룹 + 이름순</option></select></label><span class="control-count-v18">${shown.length} / ${ps.length}개</span>
+    </div>
+    <div class="control-row-v18 action-row-v18"><button class="secondary" onclick="selectAllVisibleProducts(true);renderProducts()">전체선택</button><button class="secondary" onclick="S.selectedProducts.clear();S.productSelectionFilter='all';renderProducts()">선택해제</button><button class="secondary" onclick="moveSelectedProducts(-1)">↑ 위로</button><button class="secondary" onclick="moveSelectedProducts(1)">↓ 아래로</button><button class="danger" onclick="deleteSelectedProducts()">선택삭제</button></div>
+    <div class="control-row-v18 view-row-v18"><div class="view-select-v19"><select onchange="S.productView=this.value;renderProducts()"><option value="detail" ${S.productView==='detail'?'selected':''}>큰 아이콘</option><option value="name" ${S.productView==='name'?'selected':''}>보통 아이콘</option><option value="image" ${S.productView==='image'?'selected':''}>작은 아이콘</option><option value="deck" ${S.productView==='deck'?'selected':''}>목록 (Deck)</option></select></div><label class="page-size-v18">표시수 <select onchange="S.pageSize=+this.value;renderProducts()">${[10,20,50,100].map(n=>`<option ${S.pageSize===n?'selected':''}>${n}</option>`).join('')}</select></label></div>
+  </div>${body}${productHistoryHtmlV10()}`;
+}
+
+
+/* ===== v26 SAFE persistence/sync reset =====
+   Rules:
+   1) Supabase app_state(id='main', data) is the shared source of truth.
+   2) Never replace meaningful local data with an empty/invalid server payload.
+   3) Never seed an empty server with blank/default data.
+   4) Every edit is cached locally first, then POSTed, then verification-read.
+   5) No endless spinner: status is plain text only.
+*/
+S.v26={busy:false,ready:false,dirty:false,pending:0,lastRemote:'',timer:null,lastOk:0};
+function v26Meaningful(d){
+  if(!d||typeof d!=='object')return false;
+  return ['products','inventory','customers','invoices','stock_logs','return_history'].some(k=>Array.isArray(d[k])&&d[k].length>0);
+}
+function v26Valid(d){return d&&typeof d==='object'&&Array.isArray(d.products)&&Array.isArray(d.inventory)&&Array.isArray(d.customers)&&Array.isArray(d.invoices)}
+function v26Status(text,state=''){
+  const el=document.getElementById('syncState');
+  if(el){el.textContent=text;el.dataset.state=state;el.classList.remove('is-syncing','spinning','loading')}
+}
+function v26LocalSave(){try{saveLocal()}catch(e){console.error('local save',e)}}
+async function v26Read(){return await v14RestRead()}
+async function v26WriteAndVerify(){
+  const saved=await v14RestWrite();
+  const row=await v26Read();
+  if(!row?.data||!v26Valid(row.data))throw new Error('서버 저장 확인 실패');
+  return row;
+}
+async function v26SyncNow(){
+  if(S.v26.busy||!navigator.onLine)return false;
+  if(!v14ValidConfig()){v26Status('공용 데이터 연결 설정 필요','error');return false}
+  S.v26.busy=true;v26Status('저장 중','syncing');
+  try{
+    const row=await v26WriteAndVerify();
+    S.remoteUpdatedAtV14=row.updated_at||'';S.v26.lastRemote=S.remoteUpdatedAtV14;
+    S.v26.dirty=false;S.localDirtyV14=false;S.v26.pending=0;S.pendingSyncV14=0;S.v26.lastOk=Date.now();
+    v26LocalSave();v26Status('저장 완료 · 공용 데이터','ok');return true;
+  }catch(e){console.error('V26_SYNC',e);S.v26.dirty=true;S.localDirtyV14=true;v26Status('저장 실패 · 기기에 임시 보관','error');return false}
+  finally{S.v26.busy=false}
+}
+async function v26Refresh(){
+  if(S.v26.busy||S.v26.dirty||!navigator.onLine||!S.v26.ready)return;
+  S.v26.busy=true;
+  try{
+    const row=await v26Read();
+    if(row?.data&&v26Valid(row.data)&&v26Meaningful(row.data)){
+      if(!S.v26.lastRemote||row.updated_at!==S.v26.lastRemote){
+        S.data=row.data;normalizeData();ensureV13Data?.();ensureV14Auth();pruneHistory?.();
+        S.remoteUpdatedAtV14=row.updated_at||'';S.v26.lastRemote=S.remoteUpdatedAtV14;v26LocalSave();
+        try{render();applyRoleUI?.()}catch(e){console.error(e)}
+      }
+      v26Status('동기화 완료 · 공용 데이터','ok');
+    } else if(v26Meaningful(S.data)) {
+      // Preserve local work. An empty server must never erase it.
+      v26Status('서버 데이터 없음 · 현재 데이터 보존','warn');
+    } else {
+      v26Status('연결됨 · 등록 데이터 없음','ok');
+    }
+  }catch(e){console.error('V26_REFRESH',e);v26Status('연결 확인 실패 · 현재 데이터 보존','error')}
+  finally{S.v26.busy=false}
+}
+async function v26ConnectCloud(){
+  clearInterval(S.cloudPollV14);clearInterval(S.v26.timer);
+  if(!v14ValidConfig()){S.cloudReadyV14=false;S.v26.ready=false;v26Status('Supabase 연결 설정 필요','error');return}
+  v26Status('연결 확인','');
+  try{
+    const row=await v26Read();
+    S.cloudReadyV14=true;S.cloud=true;S.v26.ready=true;
+    const remoteGood=row?.data&&v26Valid(row.data)&&v26Meaningful(row.data);
+    const localGood=v26Meaningful(S.data);
+    if(remoteGood){
+      S.data=row.data;normalizeData();ensureV13Data?.();ensureV14Auth();pruneHistory?.();
+      S.remoteUpdatedAtV14=row.updated_at||'';S.v26.lastRemote=S.remoteUpdatedAtV14;v26LocalSave();
+      try{render();applyRoleUI?.()}catch(e){console.error(e)}
+      v26Status('동기화 완료 · 공용 데이터','ok');
+    } else if(localGood){
+      // Recovery/migration: keep local data and persist it once to an empty server.
+      S.v26.dirty=true;S.localDirtyV14=true;await v26SyncNow();
+    } else {
+      v26Status('연결됨 · 등록 데이터 없음','ok');
+    }
+    S.v26.timer=setInterval(()=>{if(S.v26.dirty)v26SyncNow();else v26Refresh()},1800);
+  }catch(e){console.error('V26_CONNECT',e);S.cloudReadyV14=false;S.v26.ready=false;v26Status('연결 실패 · 기기 데이터 유지','error')}
+}
+// Final persistence override used by ALL product/inventory/customer/invoice edits.
+persist=async function(){
+  ensureV13Data?.();ensureV14Auth();pruneHistory?.();
+  v26LocalSave();S.v26.dirty=true;S.localDirtyV14=true;S.v26.pending++;S.pendingSyncV14=S.v26.pending;
+  if(S.v26.ready)await v26SyncNow(); else v26Status('기기에 저장됨 · 서버 연결 대기','warn');
+}
+// Old listeners call these names, so redirect them to the safe engine.
+v14ConnectCloud=v26ConnectCloud;v14SyncNow=v26SyncNow;v14Refresh=v26Refresh;
+window.addEventListener('online',()=>{if(S.v26.ready){if(S.v26.dirty)v26SyncNow();else v26Refresh()}else v26ConnectCloud()});
+window.addEventListener('offline',()=>v26Status('오프라인 · 기기에 저장됨','warn'));
+document.addEventListener('visibilitychange',()=>{if(!document.hidden){if(S.v26.dirty)v26SyncNow();else v26Refresh()}});
+// Direct start too: this avoids iframe/DOMContentLoaded timing problems.
+setTimeout(v26ConnectCloud,60);
